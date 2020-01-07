@@ -114,8 +114,8 @@ nicer_plot <- ggplot() +
                     direction = 1,
                     na.value = 'grey85') +
   theme(plot.title = element_text(face = 'bold.italic'),
-        plot.subtitle = element_text(size = 8),
-        plot.caption = element_text(size = 8),
+        plot.subtitle = element_text(size = 6),
+        plot.caption = element_text(size = 6),
         panel.background = element_rect(fill = 'azure1'),
         panel.border = element_rect(color = 'grey50', fill = NA, size = 1),
         panel.grid   = element_line(color = 'grey70', size = .25),
