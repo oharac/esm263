@@ -73,18 +73,16 @@ Note that we don't even need the grid from the World30 shapefile, `ggplot` adds 
 
 With a basic map, we can start to use `theme` and other plot options to make it look a little nicer.  In the assignment, I used a discrete scale for colors, based on certain cut points (60%, 75%, 90%, 100%, more than 100%).  Here let's try dividing into quantiles - I like quintiles, so the bottom 20%, second 20%, etc.  Now we're mapping a discrete variable (quantiles) instead of a continuous (dependency ratio), so we'll use `scale_fill_brewer()` which works for discrete.
 
-Note on the mutate stuff: first calc which quintile each country falls in, then give it a text description.  Since we arranged by dependency ratio, we know the quintiles are in order, so `fct_inorder` forces the text descriptions to be factors in the correct order.
+Note on the mutate stuff: first calc which quintile each country falls in, then give it a text description.  We can group by quintile and pull the min/max for the text description.  Since we arranged by dependency ratio, we know the quintiles are in order, so `fct_inorder` forces the text descriptions to be factors in the correct order.
 
 ```{r}
 dep_quintiles_sf <- depratio_sf %>%
   arrange(depratio) %>% 
-  mutate(dep_qtile = ntile(depratio, 5),
-         qtile_desc = case_when(dep_qtile == 1 ~ 'bottom 20%',
-                                dep_qtile == 2 ~ 'second 20%',
-                                dep_qtile == 3 ~ 'middle 20%',
-                                dep_qtile == 4 ~ 'fourth 20%',
-                                dep_qtile == 5 ~ 'top 20%',
-                                TRUE ~ NA_character_), ### for NAs
+  mutate(dep_qtile = ntile(depratio, 5)) %>%
+  group_by(dep_qtile) %>%
+  ### note: to escape a percent sign in sprintf, use %% - totally not confusing
+  mutate(qtile_desc = sprintf('%s%% - %s%%', round(min(depratio)), round(max(depratio))),
+         qtile_desc = ifelse(is.na(depratio), NA, qtile_desc), ### for NAs
          qtile_desc = fct_inorder(qtile_desc))
 
 ### to check what the data looks like now
@@ -105,28 +103,28 @@ Now let's change the background to blue, trim the map edges in, add a title, sub
 We'll store this plot in an object, so it doesn't immediately print to the screen; instead we'll `ggsave` it and then include the saved plot instead.
 
 ```{r}
-map_date <- Sys.Date()
-
 nicer_plot <- ggplot() +
   geom_sf(data = dep_quintiles_sf, aes(fill = qtile_desc),
-          size = .25) +
+          color = 'grey20', size = .1) +
   scale_fill_brewer(palette = 'YlOrBr', 
                     direction = 1,
                     na.value = 'grey85') +
-  theme(plot.title = element_text(face = 'bold.italic'),
-        plot.subtitle = element_text(size = 6),
-        plot.caption = element_text(size = 6),
+  theme(text = element_text(size = 6), ### default text
+        plot.title = element_text(face = 'bold.italic', size = 12),
         panel.background = element_rect(fill = 'azure1'),
         panel.border = element_rect(color = 'grey50', fill = NA, size = 1),
         panel.grid   = element_line(color = 'grey70', size = .25),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
+        legend.key.size = unit(3, 'mm'),
+        legend.position = c(.08, .22),
+        legend.box.background = element_rect(color = 'grey20', size = .25),
         plot.background = element_rect(color = 'grey50', fill = NA, size = 1)) +
   coord_sf(expand = FALSE) +
-  labs(fill =  'Quintile',
+  labs(fill =  'Dependency ratio\n(quintile)',
        title = 'Dependency Ratio (2000 estimates)',
-       subtitle = paste0("Map drawn by Casey O'Hara, ", map_date),
-       caption = paste("Source: Bureau of Census etc.",
+       caption = paste("Map drawn by Casey O'Hara, 1/20/20",
+                       "Source: Bureau of Census etc.",
                        "CountryWatch and ESRI, etc.",
                        sep = '\n')) ### use \n to get multiple lines
 
@@ -134,5 +132,65 @@ ggsave('basic_plot.png', dpi = 300, width = 6.5, height = 3.5)
 ```
 
 ![](basic_plot.png)
+
+
+
+
+# Replicating the white-on-black map
+
+```{r}
+coal_sf <- country_data_sf %>%
+  select(coal_res = coal_res98) %>%
+  mutate(coal_res = ifelse(coal_res < 0, NA, coal_res)) %>%
+  arrange(coal_res) %>% 
+  mutate(coal_cat = case_when(coal_res <= 5000   ~ '0-5B tons',
+                              coal_res <= 25000  ~ '5B-25B tons',
+                              coal_res <= 100000 ~ '25B-100B tons',
+                              coal_res <= 200000 ~ '100B-200B tons',
+                              coal_res > 200000  ~ '200B+ tons',
+                              TRUE ~ 'No Data'),
+         coal_cat = fct_inorder(coal_cat))
+```
+
+We'll use the `coal_cat` variable to drive `fill` (shades of grey with one more saturated for emphasis), `color` (all grey except emphasis), and `linetype` (solid for all but `NA`).  Then we can use `scale_X_manual()` to set scales for fill, color, and linetype separately.
+``` {r}
+
+coal_lvls <- levels(coal_sf$coal_cat)
+# "0-5B tons"      "5B-25B tons"  "25B-100B tons"  
+# "100B-200B tons" "200B+ tons"   "No Data"
+coal_fills <- c('grey20', 'grey40', 'grey60', 'grey80', '#ffffdd', 'black')
+coal_cols  <- c('grey50', 'grey50', 'grey50', 'grey50', '#ffffaa', '#662222')
+
+inverse_plot <- ggplot() +
+  geom_sf(data = coal_sf, 
+          aes(fill = coal_cat, color = coal_cat),
+          size = .15) +
+  scale_fill_manual(breaks = coal_lvls, values = coal_fills) +
+  scale_color_manual(breaks = coal_lvls, values = coal_cols) +
+  theme(text = element_text(size = 6, color = 'white', family = 'AvantGarde'), ### default text
+        plot.title = element_text(face = 'bold', size = 12),
+        plot.subtitle = element_text(face = 'bold', size = 9),
+        panel.background = element_rect(fill = 'grey10'),
+        panel.border = element_rect(color = 'grey30', fill = NA, size = 1),
+        panel.grid   = element_line(color = 'grey30', size = .25),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.key.size = unit(3, 'mm'),
+        legend.key = element_rect(color = NA, fill = NA),
+        legend.position = c(.08, .25),
+        legend.background = element_rect(fill = NA),
+        plot.background = element_rect(color = 'grey50', fill = 'grey10', size = 1)) +
+  coord_sf(expand = FALSE) +
+  labs(fill =  'Coal reserves', color = 'Coal reserves',
+       title = 'NATIONAL COAL RESERVES 1998',
+       caption = paste("Map drawn by Casey O'Hara, 1/20/20",
+                       "Source: Bureau of Census etc.",
+                       "CountryWatch and ESRI, etc.",
+                       sep = '\n')) ### use \n to get multiple lines
+
+ggsave('inverse_plot.png', dpi = 300, width = 6.5, height = 3.5)
+```
+
+![](inverse_plot.png)
 
 
