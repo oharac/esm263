@@ -9,6 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(sf)
+library(extrafont)
 ```
 
 # Overview
@@ -158,8 +159,8 @@ We'll use the `coal_cat` variable to drive `fill` (shades of grey with one more 
 coal_lvls <- levels(coal_sf$coal_cat)
 # "0-5B tons"      "5B-25B tons"  "25B-100B tons"  
 # "100B-200B tons" "200B+ tons"   "No Data"
-coal_fills <- c('grey20', 'grey40', 'grey60', 'grey80', '#ffffdd', 'black')
-coal_cols  <- c('grey50', 'grey50', 'grey50', 'grey50', '#ffffaa', '#662222')
+coal_fills <- c('grey20', 'grey40', 'grey60', 'grey80', '#ffffaa', 'black')
+coal_cols  <- c('grey50', 'grey50', 'grey50', 'grey50', '#ffff88', '#882222')
 
 inverse_plot <- ggplot() +
   geom_sf(data = coal_sf, 
@@ -170,7 +171,7 @@ inverse_plot <- ggplot() +
   theme(text = element_text(size = 6, color = 'white', family = 'AvantGarde'), ### default text
         plot.title = element_text(face = 'bold', size = 12),
         plot.subtitle = element_text(face = 'bold', size = 9),
-        panel.background = element_rect(fill = 'grey10'),
+        panel.background = element_rect(fill = 'black'),
         panel.border = element_rect(color = 'grey30', fill = NA, size = 1),
         panel.grid   = element_line(color = 'grey30', size = .25),
         axis.text = element_blank(),
@@ -179,7 +180,7 @@ inverse_plot <- ggplot() +
         legend.key = element_rect(color = NA, fill = NA),
         legend.position = c(.08, .25),
         legend.background = element_rect(fill = NA),
-        plot.background = element_rect(color = 'grey50', fill = 'grey10', size = 1)) +
+        plot.background = element_rect(color = 'grey50', fill = 'black', size = 1)) +
   coord_sf(expand = FALSE) +
   labs(fill =  'Coal reserves', color = 'Coal reserves',
        title = 'NATIONAL COAL RESERVES 1998',
