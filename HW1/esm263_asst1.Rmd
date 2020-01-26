@@ -6,10 +6,9 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 library(tidyverse)
 library(sf)
-library(extrafont)
 ```
 
 # Overview
@@ -168,7 +167,8 @@ inverse_plot <- ggplot() +
           size = .15) +
   scale_fill_manual(breaks = coal_lvls, values = coal_fills) +
   scale_color_manual(breaks = coal_lvls, values = coal_cols) +
-  theme(text = element_text(size = 6, color = 'white', family = 'AvantGarde'), ### default text
+  theme(text = element_text(size = 6, color = 'white', family = 'AvantGarde'), 
+          ### default text; note AvantGarde might not work on some systems
         plot.title = element_text(face = 'bold', size = 12),
         plot.subtitle = element_text(face = 'bold', size = 9),
         panel.background = element_rect(fill = 'black'),
