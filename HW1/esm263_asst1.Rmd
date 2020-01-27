@@ -158,8 +158,8 @@ We'll use the `coal_cat` variable to drive `fill` (shades of grey with one more 
 coal_lvls <- levels(coal_sf$coal_cat)
 # "0-5B tons"      "5B-25B tons"  "25B-100B tons"  
 # "100B-200B tons" "200B+ tons"   "No Data"
-coal_fills <- c('grey20', 'grey40', 'grey60', 'grey80', '#ffffaa', 'black')
-coal_cols  <- c('grey50', 'grey50', 'grey50', 'grey50', '#ffff88', '#882222')
+coal_fills <- c('grey20', 'grey40', 'grey60', 'grey80', 'grey95', 'black')
+coal_cols  <- c('grey50', 'grey50', 'grey50', 'grey50', '#ffff44', '#882222')
 
 inverse_plot <- ggplot() +
   geom_sf(data = coal_sf, 
