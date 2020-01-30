@@ -9,6 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 library(tidyverse)
 library(sf)
+library(cowplot)
 ```
 
 # Overview
@@ -67,7 +68,7 @@ ggplot() +
     ### palette to go all the way to zero
 ```
 
-Note that we don't even need the grid from the World30 shapefile, `ggplot` adds graticules for us.
+Note that we don't even need the grid from the World30 shapefile, `ggplot` adds graticules for us.  Note also that the color scale is continuous - not broken into quintiles or anything.
 
 # Making it fancy
 
@@ -98,7 +99,7 @@ ggplot() +
 
 ```
 
-Now let's change the background to blue, trim the map edges in, add a title, subtitle, and caption.  We'll also drop the degree markers around the edges. We'll add a heavier border to the map (`panel.border`) and the whole image (`plot.background`). The `theme` ggplot layer can change the format of pretty much any element you want to change.
+Now let's change the background to blue, trim the map edges in, add a title, subtitle, and caption.  We'll also drop the degree markers around the edges. The `theme` ggplot layer can change the format of pretty much any element you want to change.
 
 We'll store this plot in an object, so it doesn't immediately print to the screen; instead we'll `ggsave` it and then include the saved plot instead.
 
@@ -111,17 +112,14 @@ nicer_plot <- ggplot() +
                     na.value = 'grey85') +
   theme(text = element_text(size = 6), ### default text
         plot.title = element_text(face = 'bold.italic', size = 12),
-        panel.background = element_rect(fill = 'azure1'),
-        panel.border = element_rect(color = 'grey50', fill = NA, size = 1),
-        panel.grid   = element_line(color = 'grey70', size = .25),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
         legend.key.size = unit(3, 'mm'),
         legend.position = c(.08, .22),
         legend.box.background = element_rect(color = 'grey20', size = .25),
-        plot.background = element_rect(color = 'grey50', fill = NA, size = 1)) +
-  coord_sf(expand = FALSE) +
-  labs(fill =  'Dependency ratio\n(quintile)',
+        panel.background = element_rect(fill = 'azure1', color = 'grey50')) +
+  coord_sf(expand = FALSE, datum = NA) + ### datum = NA suppresses the graticules
+  labs(fill =  'Dependency ratio',
        title = 'Dependency Ratio (2000 estimates)',
        caption = paste("Map drawn by Casey O'Hara, 1/20/20",
                        "Source: Bureau of Census etc.",
@@ -194,4 +192,62 @@ ggsave('inverse_plot.png', dpi = 300, width = 6.5, height = 3.5)
 
 ![](inverse_plot.png)
 
+# Multiple maps and insets with `cowplot`
 
+The `cowplot` package allows you to combine multiple plots/maps/graphics objects (`grob`s) into one.  For example, a figure in a journal article might have parts A, B, and C; `cowplot` can do that.  Here we'll do something simple with it - first we'll just put both into a single figure, using the `cowplot::plot_grid()` function.  
+
+Note that you might have to play with the saved image size to make it look good.  Because `geom_sf` locks the aspect ratio (height vs width) it might add a lot of white space to make it fit your saved plot size...
+
+```{r}
+multi_plot <- cowplot::plot_grid(nicer_plot, inverse_plot, 
+                                 align = 'h', ncol = 1, labels = c('A', 'B'))
+
+ggsave('multi_plot.png', width = 6.5, height = 7)
+
+knitr::include_graphics('multi_plot.png') ### a different way of including images in R Markdown
+```
+
+## Adding an inset
+
+Now let's add one of our previous maps (`nicer_plot`) to the other one (`inverse_plot`) as an inset.  Here we'll use `cowplot::ggdraw()` which sort of sets up a combo plot canvas to which we can add plots, and `cowplot::draw_plot()` to add plots to it.  By default, `cowplot` thinks of the canvas as an x and y axis going from 0 (bottom left corner) to 1 (moving up or to the right), so we can position and size our plots using this. 
+
+We'll deconstruct our maps to separate the map itself from the legend using `cowplot::get_panel` and `cowplot::get_legend` (note, this also drops the title etc).  The legend objects don't play all that well here, so there are some alignment issues, but you can get the idea.
+
+```{r}
+
+### Modifying the legend so it's black text on white background, and matches
+### the legend for the dependency ratio plot...
+inv_plot_new_legend <- inverse_plot + 
+  theme(legend.background = element_rect(fill = 'white'),
+        legend.box.background = element_rect(color = 'grey20', size = .25),
+        text = element_text(color = 'black', family = 'sans'))
+
+coal_map <- get_panel(inverse_plot)
+coal_legend <- get_legend(inv_plot_new_legend)
+depratio_map <- get_panel(nicer_plot)
+depratio_legend <- get_legend(nicer_plot)
+
+inset_plot <- ggdraw() +
+  draw_plot(coal_map, 
+            x = 0, y = .1,              ### locate the bottom left corner at (0, .1)
+            width = 1, height = .9) +   ### make the plot 1 wide (full panel) and .9 tall (from 0.1 to 1)
+  draw_plot(depratio_map,
+            x = .04, y = .35,            ### locate the bottom left at (0.04, 0.30)
+            width = .20, height = .20) + ### shrink this map to be smaller.
+  draw_plot(depratio_legend,
+            x = .06, y = .10,            ### locate the bottom left at (.06, .05)
+            width = .2, height = .3) +   ### legend interacts weirdly with size and location so play around
+  draw_plot(coal_legend,
+            x = .76, y = .10,            ### locate the bottom left at (.06, .05)
+            width = .2, height = .3) 
+
+ggsave('inset_plot.png', width = 6.5, height = 4)
+
+knitr::include_graphics('inset_plot.png') 
+```
+
+## more complicated example
+
+Not gonna put the code here for this one, but to give a sense of what you can do with `cowplot` and `ggplot`, here's a complex map graphic I assembled for a paper, [Changes in ocean health in British Columbia from 2001 to 2016](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0227502)
+
+`r knitr::include_graphics('flower_plot_map_2016.png')`
