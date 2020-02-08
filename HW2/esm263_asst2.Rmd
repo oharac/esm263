@@ -1,0 +1,252 @@
+---
+title: "ESM263 Assignment 2"
+author: "Casey O'Hara"
+date: "2/6/2020"
+output: 
+  html_document:
+    toc: yes
+    number_sections: yes
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+### NOTE: loading the raster package BEFORE tidyverse... to avoid the
+### raster::select() function from overriding the dplyr::select().
+library(raster)
+library(sf)
+library(tidyverse)
+```
+
+# Overview
+
+Here we will use the shapefiles provided by Frew in `HW2.gdb` to analyze impacts to Santa Barbara under different scenarios of sea level rise.  We will:
+
+* Use the simple features `sf` $\textsf R$ package function `st_read()` (and its fraternal twin `read_sf()`) to read in vector spatial data in a couple of formats.
+* Use geoprocessing functions within the `sf` package, such as `st_intersection()`, to help perform a spatial join.
+* Summarize cumulative effects of sea level rise on area flooded (hectares flooded), parcels flooded (count of parcels), and property losses (millions of $).
+* In the second part we will replicate the Model Builder steps in Lab 5 by creating an Elevation layer from a topography raster clipped to our Region of Interest.
+
+Note we won't focus too much on creating fancy maps; some of that can be found in `HW1/esm263_asst1.Rmd`.
+
+# Load the various data layers
+
+Here we'll load vector spatial data for the elevation layer, region of interest layer, parcels layer, and a few others we might want to put on a map later. In addition to the original `HW2.gdb`, I've exported some of the data from the `HW2.gdb` geodatabase into shapefiles.  This way we can see how to access different types of data.
+
+Note, I like to use suffixes on my various $\textsf R$ objects to keep track of what kind of data the object holds, so for example, the elevation data as a simple features class is read in as `elev_sf`.
+
+We will use `janitor::clean_names()` to clean up the column names for each of these.
+
+```{r}
+### use st_layers() to peek inside a geodatabase to see what layers are
+### available inside
+st_layers('data/HW2.gdb')
+
+
+### Let's read in the county, streets, and parcels data from 
+### the geodatabase:
+sb_county_sf <- st_read(dsn = 'data/HW2.gdb', layer = 'County') %>%
+  janitor::clean_names()
+  ### dsn is "data source name" i.e. the name of the geodatabase,
+  ### while layer is the layer name.
+  ### Note: st_read() is the basic vector spatial data read function
+
+streets_sf <- read_sf(dsn = 'data/HW2.gdb', layer = 'Streets') %>%
+  janitor::clean_names()
+  ### Note: read_sf() is identical to st_read(), EXCEPT: it doesn't
+  ### spam you with messages, and keeps strings as characters instead 
+  ### of factors.  I prefer it generally.
+
+parcels_sf   <- read_sf(dsn = 'data/HW2.gdb', layer = 'Parcels') %>%
+  janitor::clean_names()
+
+### Let's read the elevation and ROI from shapefiles.
+### Here, just stick the full path name to the .shp file into a single 
+### filename for dsn:
+elev_sf <- read_sf(dsn = 'data/shapefiles/elevation.shp') %>%
+  janitor::clean_names()
+roi_sf <- read_sf('data/shapefiles/roi.shp') %>%
+  janitor::clean_names()
+
+```
+
+
+## Checking the column names
+
+We can use `names()` to see column names for each layer.  First let's put all our objects into one list, so we can use `lapply` to quicky run one function over all the objects.  We can set the names of the list elements to better keep track of which is which.
+
+```{r}
+sf_list <- list(sb_county_sf, streets_sf, 
+                roi_sf, elev_sf, parcels_sf) %>%
+  setNames(c('county', 'streets', 'roi', 
+             'elevation', 'parcels'))
+
+### lapply() takes a list or vector as its first argument, here our list
+### of sf objects; and then a function to apply to each, here we'll use
+### the names() function to get names for each object.
+lapply(sf_list, FUN = names)
+```
+
+Notice the ones read from the geodatabase have a column called "Shape" and the ones from the shapefiles have a column called "geometry" - basically the column that holds the information on the actual points to connect into a polygon.  No idea why the different name though!
+
+## Checking the CRS
+
+Let's use `st_crs()` to examine the coordinate reference system for each of these vector spatial data objects, to make sure they're all in the same projection and datum.  Here we'll also use one of the `apply` functions, `lapply`, to apply this function over a list of objects, i.e. a list of all our `xxx_sf` objects.
+
+```{r}
+### Here, we'll use lapply with the st_crs function from the sf package.  
+### We get a list of all the CRS values for our objects.
+crs_list <- lapply(sf_list, FUN = st_crs)
+
+crs_list
+```
+
+Here we see all six objects have the same `proj4string` which is a way to contain all the info on a coordinate reference system.  For this CRS:
+
+* `+proj=aea` means projection is `aea` or Albers equal area.
+* `+lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000` establishes the standard parallels, the center longitude, and an x/y offset.
+* `+datum=NAD83` tells us the datum is the North American Datum of 1983.
+* `+units=m` tells us the units are meters, rather than degrees.
+
+## Quick plot
+
+Let's quickly plot the parcels, elevation, and ROI to see what they look like.  To trim down our map to just Santa Barbara, we can filter the `ca_cities_sf` to just Santa Barbara, and then use `st_crop()` to crop the `sb_county_sf` and `streets_sf` to the same extent for some context outside the ROI.
+
+```{r}
+
+### Create a map extent by adding a .25 km buffer around the ROI
+map_extent <- st_buffer(roi_sf, dist = 250)
+  
+### st_crop takes the first argument, and clips it down to the same
+### "bounding box" as the second argument.
+county_sb_only_sf <- st_crop(sb_county_sf, map_extent)
+
+### crop SB streets 
+sb_streets_sf <- streets_sf %>%
+  st_crop(map_extent)
+
+
+ggplot() +
+  geom_sf(data = county_sb_only_sf, 
+          color = '#88aa66', fill = '#88aa66', alpha = .7) +
+  geom_sf(data = sb_streets_sf, color = 'grey80', size = .25) +
+  geom_sf(data = elev_sf, aes(fill = gridcode), 
+          color = NA, 
+          show.legend = FALSE) +
+  geom_sf(data = parcels_sf %>%
+            st_crop(map_extent),
+          color = '#ffffff88', ### the fourth hexadecimal indicates alpha
+          size = 0.1, fill = NA) +
+  geom_sf(data = roi_sf, color = 'red', fill = NA) +
+  coord_sf(expand = FALSE) +
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+  
+```
+
+# Do a spatial join
+
+Here we'll perform a spatial join by doing the following steps:
+
+* Use `st_join()` to perform an intersection of the parcels layer with the elevation layer.
+* Use `group_by()` on the gridcode attribute (representing elevation in meters) and then `summarize()` to calculate how many parcels fall in each elevation.
+
+## Identifying and fixing an invalid geometry
+
+Note that in this analysis, I found that the `parcels_sf` has one feature that is "invalid" - basically it overlaps itself in an illegal way.  And all the features in `elev_sf` are considered invalid!  Not sure how ArcMap got around this problem!  I first noticed this because I got an error - note the "Ring Self-intersection" gives it away:
+
+```
+Error in CPL_geos_op2(op, st_geometry(x), st_geometry(y)) : 
+Evaluation error: TopologyException: Input geom 1 is invalid: Ring Self-intersection at or near point 28686.282099999487 -400885.34530000016 at 28686.282099999487 -400885.34530000016.
+```
+
+Here are two options:
+
+* identify and remove the invalid geometries.
+* use `st_buffer` with a zero-distance buffer to "fix" it - this basically redraws the invalid geometry in a way that is valid.
+
+```{r}
+### First, check whether all the bits in the parcels_sf are valid
+tmp <- st_is_valid(parcels_sf) 
+  ### a vector of TRUE/FALSE depending on whether each feature is valid
+sum(tmp == FALSE) # or could do sum(!tmp)
+  ### adds up all the FALSE values - here we see one invalid geom
+parcels_remove_sf <- parcels_sf[tmp, ]
+  ### takes parcels_sf, and keeps only those rows where tmp == TRUE,
+  ### dropping the invalid one. Note, parcels_sf has 6537 features, and
+  ### this one only as 6536, so we actually lost some data.
+parcels_buffer_sf <- st_buffer(parcels_sf, dist = 0)
+  ### note this one still has 6537 - no data lost!
+st_is_valid(parcels_buffer_sf) %>% all()
+  ### this is now all valid!  let's use the buffer method on the elev_sf.
+
+### Check invalid geoms in the elev_sf feature:
+tmp <- st_is_valid(elev_sf)
+  ### these are all invalid!  (this has to do with how this layer was
+  ### created in the first place - we'll see when we replicate Lab 5).
+
+### Use the buffer method to fix:
+elev_buffer_sf <- st_buffer(elev_sf, dist = 0)
+### check that these two solutions worked so that the entire layer
+### has only valid geometries
+st_is_valid(elev_buffer_sf) %>% all()
+```
+
+## Now to perform the spatial join
+
+The $\textsf R$ `sf::st_join()` function is a little different from an ArcMap spatial join.  The ArcMap one, as we used it, when starting with elevation and joining parcels to it, aggregates all the attributes of the parcels that fall within each polygon of the elevation map.  But `sf::st_join()` doesn't do that aggregation - it leaves all the features from the second object (parcel polygons) distinct, while keeping the overall values of the original features (elevation polygons) for each.
+
+Because of this, when we aggregate, we don't want to sum the `shape_area` from the elevation map (here `shape_area.x`), because the `shape_area.x` is already the total area for that elevation polygon, from the `elev_buffer_sf` (and `shape_area.y` is the parcel area, from the `parcels_buffer_sf`).  But for parcel count and net value, we'll sum those up.
+
+Then once we've aggregated to complete the spatial join, we find the cumulative sum for area, count, and value (this is the same as joining Join_Output to the Results table and using Frew's aggregate code).
+
+``` {r}
+parcels_elev_sf <- st_join(elev_buffer_sf, parcels_buffer_sf, left = FALSE)
+
+parcels_elev <- parcels_elev_sf %>%
+  as.data.frame() %>%
+  group_by(gridcode) %>%
+  summarize(area_m2 = first(shape_area.x),
+            parcels = n(), 
+            value_dollars = sum(net_av))
+
+### next, use cumsum() to cumulatively add up the area, parcel count, and
+### net value starting with 1 meter SLR
+parcels_elev_sum <- parcels_elev %>%
+  arrange(gridcode) %>%
+  mutate(area_ha = round(cumsum(area_m2) / 10000, 1),
+         parcels = cumsum(parcels),
+         val_mil = round(cumsum(value_dollars) / 1e6, 1)) %>%
+  select(`Sea level rise (m)`   = gridcode, 
+         `Area flooded (ha)`    = area_ha, 
+         `Parcels flooded`      = parcels, 
+         `Property loss ($Mil)` = val_mil)
+
+DT::datatable(parcels_elev_sum)
+```
+
+# Lab 5: Turning elevation raster into polygons
+
+Here we will run through the steps to take an elevation raster, and run through the process we did in Lab 5 to turn it into the elevation polygons, clipped to the ROI.  Here are the steps in the `Compute Elevation` tool in the `Lab5.tbx` toolbox.
+
+* Project Raster
+* Reclassify
+* Extract by Mask
+* Raster to Polygon
+* Dissolve
+* Feature Class to Feature Class
+
+We'll use some functions from the `raster` package, including `raster::raster()` to read the raster from the file, `raster::projectRaster()`, `raster::mask()`, `raster::rasterToPolygons()`.  Once it's in a polygon format, then we can go back to the `sf` package functions.
+
+## Project Raster
+
+First, we'll load the raster, and then reproject it into the same coordinate system as the rest of our data.  Unfortunately, there's no good way to read the raster directly from the ArcMap geodatabase, so I exported it separately as a GeoTIFF.
+
+```{r, eval = FALSE}
+st_layers('data/Lab5.gdb')
+elev_rast <- raster::raster()
+```
+
+

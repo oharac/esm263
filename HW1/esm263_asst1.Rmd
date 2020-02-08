@@ -14,9 +14,18 @@ library(cowplot)
 
 # Overview
 
-For creating a pretty map layout, R may be somewhat limited compared to ArcMap, especially since ArcMap has a graphical interface designed specifically for making nice layouts.  When we get to spatial analysis, we can do mamy things in R that we will learn how to do in ArcMap.
+The focus of this $\textsf R$ Markdown script is to show basic map-making capabilities in $\textsf R$, based on Assignment 1 from Frew's ESM 263 class.  We'll use the `sf` package and `tidyverse` to:
 
-Some notes: The `sf` package is a powerful and relatively new R package that works with vector spatial data (polygons, lines, points - as opposed to rasters).  It is designed to work well within the `tidyverse` functions and workflow.  An older system of spatial analysis was built around a package called `sp`, and its cousins `rgdal` and `rgeos`, which implement a couple of general spatial analysis libraries: [GDAL, or Geospatial Data Abstraction Library](https://gdal.org/faq.html) and [GEOS, or Geometry Engine - Open Source](https://trac.osgeo.org/geos/). The `sf` package relies on the same libraries but is much less annoying than the older `sp` package.
+* read in a shapefile containing countries of the world and the CountryWatch data
+* make simple calculations of the CountryWatch data to "bin" data into quintiles
+* use `ggplot2::ggplot()` and `ggplot2::geom_sf()` to create visualizations (maps) and play around with parameters to make the maps look nice
+* use `cowplot::plot_grid()` and some other functions from the `cowplot` package to make more complex maps using multiple elements such as legends and inset maps.
+
+## Vector spatial data in $\textsf R$
+
+For creating a pretty map layout, $\textsf R$ may be somewhat limited compared to ArcMap, especially since ArcMap has a graphical interface designed specifically for making nice layouts.  When we get to spatial analysis, we can do mamy things in $\textsf R$ that we will learn how to do in ArcMap.
+
+Some notes: The `sf` package is a powerful and relatively new $\textsf R$ package that works with vector spatial data (polygons, lines, points - as opposed to rasters).  It is designed to work well within the `tidyverse` functions and workflow.  An older system of spatial analysis was built around a package called `sp`, and its cousins `rgdal` and `rgeos`, which implement a couple of general spatial analysis libraries: [GDAL, or Geospatial Data Abstraction Library](https://gdal.org/faq.html) and [GEOS, or Geometry Engine - Open Source](https://trac.osgeo.org/geos/). The `sf` package relies on the same libraries but is much less annoying than the older `sp` package.
 
 # Load the spatial data
 

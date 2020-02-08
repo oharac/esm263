@@ -124,12 +124,12 @@ A) correctly aggregated and converted (full credit)
 B) correctly aggregated, but no conversion. (half credit)
 C) other (probably not correctly aggregated). (no credit, or check)
 
-Then for each student check that their values match one of these conditions.  Depending on how the results turn out (i.e. if there are a lot of NAs from improper matching), we may round values in the students' data frames and the check data frame to ensure matching even if small errors are present.
+Then for each student check that their values match one of these conditions.  To account for students who have rounded their results (i.e. suppressing extra decimals).
 
 ```{r}
 l_vec_unconv <-  c(51399882, 139067580, 333597714, 873587561, 1506297548,
                    2116348045, 2582901090, 3032425496, 3425427269, 3831109432)
-l_vec_conv <- l_vec_unconv / 1e6
+l_vec_conv <- round(l_vec_unconv / 1e6)
 
 ### combine vectors, attach conditions, drop alt conversions that match
 ### proper conversions...
@@ -140,7 +140,8 @@ col_l_df <- data.frame(
 
 ### grade col L: how many correct, half for unconverted
 col_l_grades <- dbf_df %>%
-  left_join(col_l_df, by = c('L' = 'l_check')) %>%
+  mutate(l_round = round(L)) %>%
+  left_join(col_l_df, by = c('l_round' = 'l_check')) %>%
   group_by(first, last) %>%
   summarize(grade_l = 
               sum(str_detect(l_result, 'agg_conv')) +         ### full credit
