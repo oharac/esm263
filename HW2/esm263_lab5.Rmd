@@ -1,0 +1,255 @@
+---
+title: "ESM263 Lab 5"
+author: "Casey O'Hara"
+date: "2/6/2020"
+output: 
+  html_document:
+    toc: yes
+    number_sections: yes
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+### NOTE: loading the raster package BEFORE tidyverse... to avoid the
+### raster::select() function from overriding the dplyr::select().
+library(raster)
+library(sf)
+library(tidyverse)
+```
+
+# Overview
+
+Here we will run through the steps to take an elevation raster, and run through the process we did in Lab 5 to turn it into the elevation polygons, clipped to the ROI.  Here are the steps in the `Compute Elevation` tool in the `Lab5.tbx` toolbox.
+
+* Project Raster
+* Reclassify
+* Extract by Mask
+* Raster to Polygon
+* Dissolve
+* Feature Class to Feature Class
+
+We'll use some functions from the `raster` package, including `raster::raster()` to read the raster from the file, `raster::projectRaster()`, `raster::mask()`, `raster::rasterToPolygons()`.  Once it's in a polygon format, then we can go back to the `sf` package functions.
+
+Note: just because we *can* do this in $\textsf R$ doesn't mean it's better than ArcMap - it's probably not as fast or efficient.  ArcMap is specifically designed to do this stuff, so it's really quite good at it.  But if you like working in $\textsf R$ and like to have an R Markdown to document your steps, here's how you can do it!  It was slow on my 10 year old MacBook Air, but a newer computer with more RAM should be able to handle this well.
+
+## Reproject Raster
+
+First, we'll load the raster from the original file, and then reproject it into the same coordinate system as the rest of our data.  Unfortunately, there's no good way to read the raster directly from the ArcMap geodatabase, so Frew exported it for me separately as a GeoTIFF.
+
+The `projectRaster()` function needs a CRS for the reprojection.  We'll set it using the proj4string definition for California Teale Albers, which among other things uses a NAD83 datum instead of the NAD27 datum (and a different ellipse as well).
+
+The `projectRaster()` function also needs a resolution for the output, so we'll use `res(elev_rast)` to get the resolution of the original raster and use that same resolution to set the new raster.  We also need an interpolation method for how it fills gaps and spaces - we'll use `ngb` for nearest neighbor, generally a safe bet that makes few assumptions.
+
+Let's also set up a test, so that if the intermediate file is already in the `scratch` folder, we won't rerun it unless we set the `reload` object to be `TRUE`.  This avoids rerunning slow processes if not necessary - in this case, trying to reproject a large raster could be really slow since R doesn't handle memory issues all that well.
+
+Note there's no reason we can't use the `tidyverse` pipe operator `%>%` here, even if it's not a data table - as long as the result of the function before `%>%` is the first argument of the function after it.
+
+```{r reproject raster}
+elev_reproj_file <- 'scratch/elev_reproj.tif'
+reload <- FALSE
+
+### define the CRS using the proj4string for California Teale Albers
+proj4_ca_teale_albers <- '+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +ellps=GRS80 +datum=NAD83 +units=m +no_defs'
+
+if(!file.exists(elev_reproj_file) | reload == TRUE) {
+  working_rast <- raster::raster('data/sb3mNAD27.tif')
+  
+  elev_reproj_rast <- working_rast %>%
+    projectRaster(crs = proj4_ca_teale_albers,
+                  res = res(working_rast),
+                  method = 'ngb',
+                  filename = elev_reproj_file,
+                  progress = 'text',
+                  overwrite = TRUE) 
+    ### note the 'filename' argument lets you write the raster output
+    ### directly to file - often quite helpful! and the 'progress' argument
+    ### shows a text progress bar so you can see how much longer it'll take.
+    ### These work for many raster package functions.
+  
+} else {
+  message('File ', elev_reproj_file, ' exists - no need to reprocess!')
+}
+  
+```
+
+
+## Reclassify raster to integers
+
+Let's load our reprojected raster file and reclassify the values to integers, where 1 means any elevation $x$ where $0 < x \leq 1$ and so on.
+We can use the `raster::reclassify()` function to classify a range of values (e.g. 0 m - 1 m) as a single value (e.g. 1 m).  For each intermediate step, let's save the output to a `scratch` folder.  
+
+
+```{r}
+working_rast <- raster::raster(elev_reproj_file)
+
+### To reclassify the raster, we need a matrix with two columns to define
+### the range and a third to define the new value, e.g. from 0 to 1 m becomes
+### 1 m, from 1.0001 m to 2 m becomes 2 m, etc.
+reclass_mtx <- matrix(
+  c(0:9,  ### "from" part of range
+    1:10, ### "to" part of range
+    1:10), ### new value after reclassify
+  ncol = 3, byrow = FALSE ### we are giving cols, not rows
+)
+
+elev_reclass_rast <- working_rast %>%
+  reclassify(reclass_mtx)
+
+### next let's set values higher than 10 and lower than 0 to NA - we don't
+### care about higher or lower elevations.  Use indexing to identify which
+### values are > 10 (and set em to NA) and same for values < 0
+values(elev_reclass_rast)[values(elev_reclass_rast) > 10] <- NA
+values(elev_reclass_rast)[values(elev_reclass_rast) < 0] <- NA
+
+plot(elev_reclass_rast, main = 'post reclassify')
+
+writeRaster(elev_reclass_rast, 'scratch/elev_reproj_reclass.tif',
+            overwrite = TRUE)
+```
+
+Note, for this case, another way we could have reclassified our values would have been to use the function `ceiling()` to round any elevation _up_ to the nearest integer (e.g. 0.99 becomes 1, 1.02 becomes 2), and then done the `values(...)[...] <- NA` trick after that.  Turns out `ceiling` is about twice as fast, but only rounds existing values - `reclassify` is more general purpose to reclassify any value range to any other value.
+
+## Mask Raster
+
+Next, we'll load the raster from the scratch file, then we'll cut down the reprojected raster to the region of interest.  Because our ROI is rectangular within our projection, we can use `raster::crop()`, which simply takes a square or rectangular bounding box and drops everything outside the bounding box, or `raster::mask()` which is more flexible to different shapes of mask rasters.  Let's use `raster::crop()` for fast processing.
+
+```{r mask raster}
+elev_mask_file <- 'scratch/elev_reproj_reclass_mask.tif'
+reload <- FALSE
+
+if(!file.exists(elev_mask_file) | reload == TRUE) {
+  working_rast <- raster::raster('scratch/elev_reproj_reclass.tif')
+  
+  roi_sf <- read_sf('data/shapefiles/roi.shp') %>%
+    janitor::clean_names() 
+  
+  roi_reproj <- roi_sf %>%
+    st_transform(proj4_ca_teale_albers)
+  
+  ### if we wanted to use mask, it would look like this:
+  # roi_mask <- fasterize::fasterize(roi_sf, working_rast)
+  # elev_reproj_mask_rast <- working_rast %>%
+  #   mask(roi_mask, progress = 'text')
+  
+  elev_reproj_mask_rast <- working_rast %>%
+    crop(roi_sf, 
+         filename = elev_mask_file, 
+         progress = 'text',
+         overwrite = TRUE)
+  
+} else {
+  message('File ', elev_mask_file, ' exists - no need to reprocess!')
+}
+
+elev_reproj_mask_rast <- raster(elev_mask_file)
+plot(elev_reproj_mask_rast, main = 'Reprojected, reclassified, masked')
+  
+```
+
+
+
+## Turn the reprojected, reclassified, cropped raster into polygons
+
+Finally let's take our prepped raster (reading from file using `raster()`) and turn it into polygons by value.  Because the `rasterToPolygons()` is also slow, if we've already done this, let's not repeat it by including an `if` test.
+
+NOTE: The `raster::rasterToPolygons()` function is quite processor and memory intensive.  I've shown two ways to do it here: one, in a big chunk, if you have a fast computer with plenty of memory, and two, broken into pieces, if you have a slow computer with not much memory.
+
+```{r one big chunk version, eval = FALSE}
+
+elev_shp_file <- 'output/elev_poly.shp'
+
+if(!file.exists(elev_shp_file) | reload) {
+
+  elev_prepped_rast <- raster(elev_mask_file)
+  
+  elev_poly <- rasterToPolygons(elev_prepped_rast, 
+                                dissolve = TRUE)
+  
+  ### this results in a polygon set that is *not* a simple feature -
+  ### it is an old school R spatial format.  So we must use an old
+  ### school function rgdal::writeOGR() to write it in the
+  ### old school format.
+  # rgdal::writeOGR(elev_poly, 
+  #                 dsn = 'output', layer = 'elev_poly', 
+  #                 driver = 'ESRI Shapefile')
+
+  ### alternately we could convert it to sf and use write_sf.
+  elev_poly_sf <- st_as_sf(elev_poly)
+  write_sf(elev_poly_sf, elev_shp_file, delete_layer = TRUE)
+
+} else {
+  message('File ', elev_shp_file, ' exists - no need to reprocess!')
+}
+
+```
+
+But since I'm running this on a 10-year old Macbook Air with only 4 GB of RAM, it chokes when trying to process the whole raster at once.  Here I chop the raster into one sea level rise value at a time, and process it in bits.  This is a good way to think about working with larger data sets on a wimpy computer: break the problem into smaller chunks!
+
+```{r broken into pieces version}
+elev_shp_file <- 'output/elev_poly.shp'
+
+if(!file.exists(elev_shp_file) | reload) {
+
+  elev_prepped_rast <- raster(elev_mask_file)
+  
+  ### iterate through the raster, for each level of sea level rise, 
+  ### turn that piece of the raster to a polygon and store as a list element.
+  elev_poly_list <- lapply(1:10, FUN = function(slr) {
+    ### slr <- 1
+    cat('processing ', slr, ' m layer...\n')
+    x_rast <- elev_prepped_rast
+    
+    ### only keep raster cells with the current value of SLR
+    values(x_rast)[values(x_rast) != slr] <- NA
+    
+    ### turn this simplified raster into polygons, turn into sf (instead of
+    ### sp object from older school R spatial package `sp`)
+    y <- rasterToPolygons(x_rast, dissolve = TRUE)
+    y_sf <- st_as_sf(y)
+  })
+  
+  ### now bind all these sf pieces together!  here I'll use a quick for loop
+  ### to bind each piece to the whole.  First, pull out the first element:
+  elev_sf <- elev_poly_list[[1]]
+  
+  ### then add each element to the elev_sf object, one at a time:
+  for(i in 2:10) {
+    elev_sf <- rbind(elev_sf, elev_poly_list[[i]])
+  }
+  
+  ### write it all to disk.  delete_layer = TRUE is basically
+  ### allowing write_sf to overwrite an existing file.
+  write_sf(elev_sf, elev_shp_file, delete_layer = TRUE)
+
+} else {
+  message('File ', elev_shp_file, ' exists - no need to reprocess!')
+}
+
+```
+
+## Plot the polygons
+
+Get the ROI, polygons, and the SB county shape info and make a quick plot of them.
+
+```{r plot the results}
+elev_sf <- read_sf('output/elev_poly.shp')
+roi_sf <- read_sf('data/shapefiles/roi.shp')
+### just for fun/practice let's read the county from within the .gdb:
+county_sf <- read_sf(dsn = 'data/HW2.gdb', layer = 'County') %>%
+  janitor::clean_names()
+
+roi_buffered <- st_buffer(roi_sf, dist = 500)
+county_cropped <- county_sf %>%
+  st_crop(roi_buffered)
+ggplot() +
+  theme_minimal() +
+  theme(axis.text = element_blank()) +
+  geom_sf(data = county_cropped, fill = '#aabb99', color = 'grey20') +
+  geom_sf(data = elev_sf, aes(fill = elev), 
+          color = 'grey30', size = .1) +
+  geom_sf(data = roi_sf, color = 'red', fill = NA) +
+  scale_fill_viridis_c(option = 'plasma')
+```
+

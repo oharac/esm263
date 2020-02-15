@@ -26,7 +26,7 @@ Here we will use the shapefiles provided by Frew in `HW2.gdb` to analyze impacts
 * Use the simple features `sf` $\textsf R$ package function `st_read()` (and its fraternal twin `read_sf()`) to read in vector spatial data in a couple of formats.
 * Use geoprocessing functions within the `sf` package, such as `st_intersection()`, to help perform a spatial join.
 * Summarize cumulative effects of sea level rise on area flooded (hectares flooded), parcels flooded (count of parcels), and property losses (millions of $).
-* In the second part we will replicate the Model Builder steps in Lab 5 by creating an Elevation layer from a topography raster clipped to our Region of Interest.
+* In `esm263_lab5.Rmd` we replicate the Model Builder steps in Lab 5 by creating an Elevation layer from a topography raster clipped to our Region of Interest.
 
 Note we won't focus too much on creating fancy maps; some of that can be found in `HW1/esm263_asst1.Rmd`.
 
@@ -226,27 +226,4 @@ parcels_elev_sum <- parcels_elev %>%
 
 DT::datatable(parcels_elev_sum)
 ```
-
-# Lab 5: Turning elevation raster into polygons
-
-Here we will run through the steps to take an elevation raster, and run through the process we did in Lab 5 to turn it into the elevation polygons, clipped to the ROI.  Here are the steps in the `Compute Elevation` tool in the `Lab5.tbx` toolbox.
-
-* Project Raster
-* Reclassify
-* Extract by Mask
-* Raster to Polygon
-* Dissolve
-* Feature Class to Feature Class
-
-We'll use some functions from the `raster` package, including `raster::raster()` to read the raster from the file, `raster::projectRaster()`, `raster::mask()`, `raster::rasterToPolygons()`.  Once it's in a polygon format, then we can go back to the `sf` package functions.
-
-## Project Raster
-
-First, we'll load the raster, and then reproject it into the same coordinate system as the rest of our data.  Unfortunately, there's no good way to read the raster directly from the ArcMap geodatabase, so I exported it separately as a GeoTIFF.
-
-```{r, eval = FALSE}
-st_layers('data/Lab5.gdb')
-elev_rast <- raster::raster()
-```
-
 
