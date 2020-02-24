@@ -1,0 +1,556 @@
+---
+title: "ESM263 Assignment 3"
+author: "Casey O'Hara"
+date: "2/21/2020"
+output: 
+  html_document:
+    toc: yes
+    number_sections: yes
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+### NOTE: loading the raster package BEFORE tidyverse... to avoid the
+### raster::select() function from overriding the dplyr::select().
+library(raster)
+library(fasterize)
+library(sf)
+library(tidyverse)
+```
+
+# Site suitability analysis for wind power subsidies {.tabset}
+
+## Overview
+
+Here we will use the data provided by Frew in `HW3.gdb` and a separately-exported raster `Wind2002.tif` (since rasters in geodatabases are not readily accessible except in ArcMap) to recreate the same basic analysis as we built in Model Builder for assignment 3.  The main steps:
+
+* Create the masks:
+  * Create a wind mask based on 200 m raster cells with class 3 or higher wind resources.
+  * Create a road mask based on areas within 7.5 km of existing major roads.
+  * Create an urban mask based on areas farther than 1 mile from urban areas.
+  * Create a public mask based on areas that are not public parks etc.
+  * Create a fire risk mask based on areas that are not classified as fire hazard areas.
+  * Create an airport mask based on areas that are farther than 7.5 km from airports.
+* Combine the masks to identify suitable areas.
+* Identify contiguous suitable regions and rank the top ten based on area.
+
+As in other assignments, there are a few ways to do some of these steps, so I'll show a few options where I can.  First, let's set up a couple of things, analogous to our environment settings.
+
+```{r}
+### Set up a base raster with the CRS, extent, and resolution for our
+### analysis.  This is based on the wind raster.
+
+base_rast <- raster('data/Wind2002.tif')
+base_rast
+
+# st_layers('data/basemap.gdb')
+county_sf <- read_sf(dsn = 'data/basemap.gdb', layer = 'County')
+rivers_sf <- read_sf(dsn = 'data/basemap.gdb', layer = 'MajorRivers')
+cities_sf <- read_sf(dsn = 'data/basemap.gdb', layer = 'Cities')
+roads_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'CenterLines2008')
+
+### also set the preferred CRS, CA Teale Albers NAD 1987 in meters.
+### We can get this from either the base rast or the county sf objects.
+ca_alb <- st_crs(county_sf)
+```
+
+### Working with rasters in R
+
+Rasters are really pretty nice to work with in R, especially if you know a few things about how R thinks about them.  As `raster` objects, they contain a matrix of cell values and the spatial information (CRS, cell resolution, extent, etc) to map those cells.
+
+But we can access the cell values directly and manipulate them a bit if we realize that the values can also be considered just a really big vector, reading cell values from the top left, across in a row, then the next row down, and so on until the last value is the bottom right.
+
+So while `raster::reclassify()` does the trick, we can also simply reach in and replace values directly using indexing, e.g to turn low values of the base raster into NAs:
+
+``` {r}
+x <- values(base_rast)
+base_copy <- base_rast
+base_copy[x < 3] <- NA
+plot(base_copy, col = bpy.colors(9))
+```
+
+We can also use basic arithmetic to calculate things with rasters, as if they're just vectors, while keeping in mind that `NA`s will poison the calculation (and we can use that to our advantage).  Note the NAs from `base_copy` are missing when we add it back to `base_rast`:
+``` {r}
+base_math <- base_rast + base_copy
+plot(base_math, col = heat.colors(9))
+```
+
+## Create the masks {.tabset}
+
+Click on the tabs to see each model in turn.
+
+### Create wind mask
+
+![](img/wind.jpg)
+
+Here we can simply use the `raster::reclassify()` function just as we did in ArcMap model builder.  We'll need to set up a matrix of original values and the new values.  There's also another way to do the same thing, shown after `reclassify()`.
+
+```{r}
+wind_raw_rast <- raster('data/Wind2002.tif')
+plot(wind_raw_rast, main = 'Raw wind raster', legend = FALSE)
+
+
+reclass_mtx <- matrix(data = c(c( 1,  2, 3, 4, 5, 6, 7),
+                               c(NA, NA, 1, 1, 1, 1, 1)),
+                      ncol = 2, byrow = FALSE)
+reclass_mtx
+
+wind_mask <- raster::reclassify(wind_raw_rast, rcl = reclass_mtx)
+plot(wind_mask, main = 'Reclassified wind raster', legend = FALSE)
+
+```
+
+But we can also use vector indexing to directly replace the values too!
+
+```{r}
+### first make a copy of the wind_raw_rast so we can change it
+wind_mask2 <- wind_raw_rast
+
+values(wind_mask2)[values(wind_mask2) < 3] <- NA
+### note, we haven't changed the other values to 1 yet; technically
+### that's fine - a mask really only needs to have data cells and
+### NA cells.  But let's change them anyway - here's a trick I like to
+### use to quickly set all non-NAs (and non-zeros) to 1: simply 
+### divide the raster by itself!
+wind_mask2 <- wind_mask2 / wind_mask2
+plot(wind_mask2, main = 'Wind mask alt method', legend = FALSE)
+
+```
+
+The two masks are identical.  Let's write one to `output`:
+
+```{r}
+identical(wind_mask, wind_mask2)
+writeRaster(wind_mask, 'output/wind_mask.tif', overwrite = TRUE)
+```
+
+### Create road mask
+
+![](img/roads.jpg)
+
+Let's read in the roads layer, and create a mask from that (remembering we need to project it to a new CRS, using `sf::st_transform()`, and using our `ca_alb` CRS we borrowed from the County layer).  The `raster` package doesn't have a nice Euclidean Distance function, and the `distance` and `distanceToPoints` functions like an old-school spatial object (`sp` package), rather than an `sf` object.  So here we'll use a different method:
+
+* use `st_transform()` to project the roads into CA Teale Albers.
+* feed that into `st_buffer` and set a distance of 7,500 m.
+* collapse all the results into a single feature (we don't care about the road details, just whether there is a road or not)
+* Note, this is a little slow.  Let's check to see if we already have a mask, and if so, skip rerunning it.
+* Let's save it as a geopackage rather than a shapefile!
+
+(We could do this same method in ArcMap too, using different tools instead of Euclidean Distance and Reclassify).
+
+```{r}
+road_mask_file <- 'output/road_mask.gpkg'
+
+if(!file.exists(road_mask_file)) {
+  # st_layers('data/HW3.gdb')
+  roads_raw_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'CenterLines2008')
+  # st_crs(roads_raw_sf) ### note +units=us-ft instead of meters
+  roads_project_sf <- roads_raw_sf %>%
+    st_transform(ca_alb)
+  
+  ### Now, buffer it, union the results (flatten into a single
+  ### feature), then intersect it with the County (not necessary,
+  ### but why not)
+  roads_mask <- roads_project_sf %>%
+    st_buffer(dist = 7500) %>%
+    st_union(by_feature = FALSE) %>%
+    st_intersection(county_sf)
+  
+  write_sf(roads_mask, road_mask_file, delete_layer = TRUE)
+} else {
+  roads_mask <- read_sf(road_mask_file)
+}
+
+plot(roads_mask, main = 'Roads mask', legend = FALSE)
+```
+
+But we can also rasterize this.  When putting all the masks together, having them all as rasters can give us some nice advantages.  So let's just do that here while we're at it.  We'll use the `fasterize::fasterize()` function to quickly take the `sf` object and turn it to a raster.
+
+Why `fasterize()` and not the `raster::rasterize()`?  a) it's faster, by a long shot. b) `rasterize()` sometimes chokes when rasterizing polygons that have holes in them, leaving weird artifacts in the resulting raster that will screw up your analysis.
+
+```{r}
+roads_mask_rast <- fasterize::fasterize(roads_mask, base_rast)
+
+plot(roads_mask_rast, 
+     main = 'Roads mask as raster', legend = FALSE)
+
+### The vector roads mask has different extensions, so we can save the raster
+### as a tif without risk of overwriting the vector files.
+writeRaster(roads_mask_rast, 'output/roads_mask.tif', overwrite = TRUE)
+
+```
+
+### Create urban mask
+
+![](img/urban.jpg)
+
+We can do this process in a similar way we did the roads, using `st_buffer` to create the exclusion area (rather than the inclusion area), and then subtracting that from the County polygon.
+
+* Union the two Urban layers.
+* Feed the urban polygons into `st_buffer` and set a distance of 1609 m (~1 mile)
+* Subtract that from the County polygon using `st_difference()`.
+* Let's save it as a geopackage rather than a shapefile.
+
+```{r}
+urban_mask_file <- 'output/urban_mask.gpkg'
+
+if(!file.exists(urban_mask_file)) {
+  # st_layers('data/HW3.gdb')
+  urban_2001_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'Urban2001')
+  urban_2020_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'Urban2020')
+  
+  ### union the two layers, then make a buffer, then flatten that
+  ### using union with only one argument
+  urban_buffer_sf <- st_union(urban_2001_sf, urban_2020_sf) %>%
+    st_buffer(dist = 1609) %>%
+    st_union()
+  
+  ### now subtract that from the County layer.
+  urban_mask <- st_difference(county_sf, urban_buffer_sf)
+  
+  write_sf(urban_mask, urban_mask_file, delete_layer = TRUE)
+} else {
+  urban_mask <- read_sf(urban_mask_file)
+}
+
+plot(urban_mask %>% select('NAME'), 
+     main = 'Urban mask', legend = FALSE)
+```
+
+Again, let's also make a raster version for later.
+
+```{r}
+urban_mask_rast <- fasterize::fasterize(urban_mask, base_rast)
+
+plot(urban_mask_rast, main = 'Urban mask as raster', legend = FALSE)
+
+writeRaster(urban_mask_rast, 'output/urban_mask.tif', 
+            overwrite = TRUE)
+
+```
+
+#### replicating the Euclidean Distance version
+
+We can do something like the Euclidean Distance tool here.  The `raster::distance()` function takes a raster input (not a line or polygon feature) and replaces empty spaces (`NA` values) with the distance to the nearest non-NA cell.  Since the urban zones are polygons, we can rasterize those, then use the `distance()` function.  It's a little clunky but I wanted to show that it can be done.
+```{r}
+# st_layers('data/HW3.gdb')
+urban_2001_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'Urban2001')
+urban_2020_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'Urban2020')
+
+### union the two layers to a single feature.  The
+### fasterize() function requires it to be a MULTIPOLYGON geometry,
+### but for some reason st_union creates a generic geometry, so
+### I'll use st_cast() to force it back to MULTIPOLYGON
+urban_sf <- st_union(urban_2001_sf, urban_2020_sf) %>%
+  st_cast('MULTIPOLYGON')
+
+urban_rast <- fasterize(urban_sf, base_rast)
+
+### Now we can use the raster::distance() function to find the
+### distance away from the urban areas
+urban_dist <- raster::distance(urban_rast)
+
+plot(urban_dist, main = 'Distance from urban areas', legend = FALSE)
+### Now, we can reclassify it (though I'll use the indexing version
+### because it just seems cleaner to me).  First create a copy
+urban_mask2 <- urban_dist
+values(urban_mask2)[values(urban_mask2) <= 1609] <- NA
+urban_mask2 <- urban_mask2 / urban_mask2
+
+### Finally, let's mask it with the county 
+urban_mask2 <- urban_mask2 %>%
+  mask(county_sf)
+writeRaster(urban_mask2, 'output/urban_mask2.tif', 
+            overwrite = TRUE)
+
+plot(urban_mask2, 
+     main = 'Urban mask alt method', legend = FALSE)
+```
+
+How do the two raster versions compare?  The `identical()` function means identical in all respects; there's a little difference in the CRS (order of arguments) for some reason, so it will return `FALSE`.  Instead, let's compare the values by plotting one on top of the other.
+
+```{r}
+plot(urban_mask2, col = 'red', legend = FALSE)
+plot(urban_mask_rast, col = 'blue', legend = FALSE, add = TRUE)
+```
+
+You can see tiny rings of red, showing that the `distance()` version has a slight difference from the `st_buffer()` version.  How important is this difference to our analysis?  A one-mile buffer seems sort of arbitrary, so a little difference one way or the other is probably not a deal-killer.
+
+It may be that neither of these perfectly matches the output from ArcMap, either.  There are small variations in how rasterizing algorithms decide which cells to keep, which to drop, and probably in how the distance is measured. Remember that rasters are always an approximation, and we're looking at cell sizes on the order of a city block.
+
+When working with spatial data, you often have the option to choose between raster formats (and resolution, etc) and vector formats.  A good rule of thumb is:
+
+___Raster is faster, but vector is correcter.___
+
+### Create public mask
+
+![](img/public.jpg)
+
+Again, this builds on what we've done with previous layers.  We can filter the parcels to only include the public parcels, then subtract those from the county.  As with the roads, we'll need to reproject the layer (at some point) to the CRS of California Teale Albers.
+
+```{r}
+public_mask_file <- 'output/public_mask.gpkg'
+
+if(!file.exists(public_mask_file)) {
+  # st_layers('data/HW3.gdb')
+  parcels_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'Parcels')
+
+  ### transform the CRS, then filter for the public use codes.
+  ### The same text ordering trick Frew used with the Select tool
+  ### works in R (and any other language as far as I know) - so
+  ### '8000' is less than '90'.  Let's also flatten it with st_union
+  ### so it is easier for the st_difference() function.
+  parcels_public <- parcels_sf %>%
+    st_transform(ca_alb) %>%
+    filter(USECODE < '9000' & USECODE >= '6000') %>%
+    st_union(by_feature = FALSE)
+           
+  ### Subtract that from the County layer.
+  public_mask <- st_difference(county_sf, parcels_public)
+  
+  write_sf(public_mask, public_mask_file, delete_layer = TRUE)
+} else {
+  public_mask <- read_sf(public_mask_file)
+}
+
+plot(public_mask %>% select('NAME'), 
+     main = 'Public mask', legend = FALSE)
+```
+
+And yet again, let's also make a raster version for later.
+
+```{r}
+public_mask_rast <- fasterize::fasterize(public_mask, base_rast)
+
+plot(public_mask_rast, main = 'Public mask as raster', legend = FALSE)
+
+writeRaster(public_mask_rast, 'output/public_mask.tif', 
+            overwrite = TRUE)
+
+```
+
+### Create fire mask
+
+![](img/fire.jpg)
+
+This is nearly identical to the Public mask.  On my first attempt, I noticed an error that causes things to choke: 
+
+```
+Evaluation error: TopologyException: Input geom 0 is invalid: Ring Self-intersection at or near point 50040.80700000003 -400081.27190000005 at 50040.80700000003 -400081.27190000005.
+```
+
+To get around this, I dissolve the interior boundaries (using `st_union` as a "dissolve" tool) of the two fire layers before joining them.  Sometimes complicated polygon features have conflicts when you join them or subtract them; ArcMap is good at working around these conflicts, but R is not so good.  But by dissolving a bunch of polygons into one, we can sometimes avoid creating those conflicts.  If you need to keep track of the attributes, this workaround will not work for you.
+
+```{r}
+fire_mask_file <- 'output/fire_mask.gpkg'
+
+if(!file.exists(fire_mask_file)) {
+  # st_layers('data/HW3.gdb')
+  fire_lra_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'FireLRA')
+  fire_sra_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'FireSRA')
+
+  ### Filter the SRA to the proper hazard codes, and then union
+  ### the two layers.  Again, let's also flatten it with st_union
+  ### so it is easier for the st_difference() function.
+  fire_sra_filtered_sf <- fire_sra_sf %>%
+    filter(HAZ_CODE == 3) %>%
+    st_union(by_feature = FALSE) ### flatten it
+  
+  fire_joined_sf <- fire_lra_sf %>%
+    st_union(by_feature = FALSE) %>% ### flatten it
+    st_union(fire_sra_filtered_sf)   ### 
+           
+  ### Subtract that from the County layer.
+  fire_mask <- st_difference(county_sf, fire_joined_sf)
+  
+  write_sf(fire_mask, fire_mask_file, delete_layer = TRUE)
+} else {
+  fire_mask <- read_sf(fire_mask_file)
+}
+
+plot(fire_mask %>% select('NAME'), 
+     main = 'Fire mask', legend = FALSE)
+```
+
+And the raster version.
+
+```{r}
+fire_mask_rast <- fasterize::fasterize(fire_mask, base_rast)
+
+plot(fire_mask_rast, main = 'Fire mask as raster', legend = FALSE)
+
+writeRaster(fire_mask_rast, 'output/fire_mask.tif', 
+            overwrite = TRUE)
+```
+
+
+### Create airport mask
+
+![](img/airports.jpg)
+
+This is nearly identical to the Urban mask - I'll do this with a buffer again.
+
+```{r}
+airport_mask_file <- 'output/airport_mask.gpkg'
+
+if(!file.exists(airport_mask_file)) {
+  # st_layers('data/HW3.gdb')
+  airport_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'Airports')
+
+  airport_buffer_sf <- airport_sf %>%
+    st_buffer(dist = 7500) %>%
+    st_union(by_feature = FALSE)
+  
+  ### Subtract that from the County layer.
+  airport_mask <- st_difference(county_sf, airport_buffer_sf)
+  
+  write_sf(airport_mask, airport_mask_file, delete_layer = TRUE)
+} else {
+  airport_mask <- read_sf(airport_mask_file)
+}
+
+plot(airport_mask %>% select('NAME'), 
+     main = 'airport mask', legend = FALSE)
+```
+
+And the raster version.
+
+```{r}
+airport_mask_rast <- fasterize::fasterize(airport_mask, base_rast)
+
+plot(airport_mask_rast, main = 'Airport mask as raster', legend = FALSE)
+
+writeRaster(airport_mask_rast, 'output/airport_mask.tif', 
+            overwrite = TRUE)
+
+```
+
+## Extract from Mask
+
+We can do the final part of the analysis by using the `raster::mask()` function (works on `sf` objects too, not just rasters!).  We should be able to do it in one big `tidyverse` style chunk, piping one mask operation straight into the next.  
+
+Note, the order of masks doesn't matter, since we're just looking for places where all masks are "on" - with one caveat: as in the Extract from Mask tool in ArcMap, the first argument needs to be a raster, but each link in the chain will spit out a raster that feeds into the next mask call.
+
+```{r}
+
+results_rast <- wind_mask %>%
+  raster::mask(roads_mask) %>%
+  mask(fire_mask) %>%
+  mask(urban_mask) %>%
+  mask(airport_mask) %>%
+  mask(public_mask)
+
+plot(results_rast)
+```
+
+We can also use all those rasters we created, and turn them into a `RasterStack` object, layering them all together, allowing us to do quick calculations on the cell values.  Some of the things you can do with a `RasterStack` are using `raster::calc()` to sum up all the values for each cell, or multiply them, or find a mean or standard deviation.  Here we'll try two things:
+
+* multiply all the rasters together; any cell with `NA` for any layer will get an `NA`, while any cell with a 1 for all layers will get a 1.  This will duplicate the sequence of mask operations above.
+* add all the rasters together, with `na.rm = TRUE`.  This will not mask per se, but will instead tell us how many of the criteria are suitable for each cell.
+
+```{r}
+mask_stack <- raster::stack(wind_mask, 
+                            roads_mask_rast,
+                            urban_mask_rast,
+                            public_mask_rast,
+                            airport_mask_rast,
+                            fire_mask_rast)
+
+mask_product <- mask_stack %>%
+  raster::calc(fun = prod)
+plot(mask_product, main = 'Mask product', legend = FALSE)
+
+mask_sum <- mask_stack %>%
+  raster::calc(fun = sum, na.rm = TRUE)
+plot(mask_sum, main = 'Mask sum', legend = TRUE)
+```
+
+### Checking the two processes
+
+We already know that some of the masks are slightly different based on which method was used to create the mask.  Let's see how the final rasters compare:
+
+```{r}
+plot(fire_mask_rast, col = '#ffff44', legend = FALSE)
+plot(results_rast, col = 'red', add = TRUE)
+# plot(mask_product, col = '#00ff007f', add = TRUE)
+plot(fire_mask, fill = NA, add = TRUE)
+# urban_mask_rast,
+# public_mask_rast,
+# airport_mask_rast,
+# fire_mask_rast
+```
+
+## Analyzing the results
+
+Now that we've found the suitable cells, we can use `raster::clump()` to do the same basic thing as the Region Groups tool in ArcMap, to "clump" together connected raster cells and give them distinct IDs.  Let's work with the `mask_product` results.
+
+```{r}
+results_clumped <- mask_product %>%
+  raster::clump()
+plot(results_clumped)
+```
+
+To identify the top ten sites by connected area, let's use some `tidyverse` magic.  Remembering that a raster can be considered as just a long vector of cell values, we can create a dataframe with the raster cell values, then aggregate and count 'em up to rank by size.
+
+```{r}
+top_ten_df <- data.frame(group_id = values(results_clumped)) %>%
+  filter(!is.na(group_id)) %>%
+  group_by(group_id) %>%
+  summarize(cells = n(),
+            hectares = cells * 4) %>%
+  arrange(desc(cells)) %>%
+  mutate(rank = 1:n()) %>%
+  filter(rank <= 10)
+```
+
+Then we can substitute the rank values into the `results_clumped` raster, using the `raster::subs()` function to substitute raster values with new values from the `top_ten_df` data frame (kind of like `reclassify()`).  Then use `ggplot()` to make a nicer map than the base `plot()` function.
+
+```{r}
+results_ranked_rast <- raster::subs(results_clumped, top_ten_df, 
+                                    by = 'group_id', which = 'rank')
+
+### ggplot can't work directly on rasters, it needs data.frames.  Let's
+### also make the rank as a factor so it's categorical.
+results_ranked_pts <- rasterToPoints(results_ranked_rast) %>%
+  as.data.frame() %>%
+  mutate(rank = factor(rank))
+
+ggplot() +
+  theme_minimal() +
+  theme(axis.text = element_blank(),
+        axis.title = element_blank()) +
+  geom_sf(data = county_sf, fill = 'grey30', color = 'yellow') +
+  geom_sf(data = )
+  geom_raster(data = results_ranked_pts, aes(x = x, y = y, fill = rank)) +
+  scale_fill_viridis_d()
+```
+
+### Raster to polygons
+
+We can also turn the ranked results into polygons, giving us more control over display in `ggplot`.  `raster::rasterToPolygons()` turns it into an older spatial format, so we can coerce it into `sf` for easier use using the `st_as_sf()` function.
+
+```{r}
+results_ranked_poly <- rasterToPolygons(results_ranked_rast, dissolve = TRUE) %>%
+  st_as_sf() %>%
+  mutate(rank = factor(rank))
+
+ggplot() +
+  theme_minimal() +
+  theme(axis.text = element_blank(),
+        axis.title = element_blank()) +
+  geom_sf(data = county_sf, fill = 'grey30', color = 'yellow') +
+  geom_sf(data = roads_sf %>% filter(SPEED_LIM >= 45), 
+          color = 'grey50', size = .2) +
+  geom_sf(data = cities_sf, 
+          color = 'grey50', fill = 'grey40', size = .2) +
+  geom_sf(data = rivers_sf, color = 'blue', size = .2) +
+  geom_sf(data = results_ranked_poly, aes(fill = rank), 
+          show.legend = FALSE,
+          color = 'yellow', size = .1) +
+  geom_sf_text(data = cities_sf, aes(label = CITY), color = 'grey80', size = 2) +
+  geom_sf_text(data = results_ranked_poly, aes(label = rank), color = 'white', size = 5) +
+  scale_fill_viridis_d()
+```
+
