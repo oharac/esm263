@@ -174,8 +174,13 @@ if(!file.exists(elev_shp_file) | reload) {
   #                 dsn = 'output', layer = 'elev_poly', 
   #                 driver = 'ESRI Shapefile')
 
-  ### alternately we could convert it to sf and use write_sf.
+  ### alternately we could convert it to sf so we can use write_sf.
   elev_poly_sf <- st_as_sf(elev_poly)
+  
+  ### set the name of the first attribute column (i.e. not "geometry" column)
+  elev_sf <- elev_sf %>%
+    rename(elev = 1)
+
   write_sf(elev_poly_sf, elev_shp_file, delete_layer = TRUE)
 
 } else {
@@ -220,6 +225,10 @@ if(!file.exists(elev_shp_file) | reload) {
     elev_sf <- rbind(elev_sf, elev_poly_list[[i]])
   }
   
+  ### set the name of the first attribute column (i.e. not "geometry" column)
+  elev_sf <- elev_sf %>%
+    rename(elev = 1)
+  
   ### write it all to disk.  delete_layer = TRUE is basically
   ### allowing write_sf to overwrite an existing file.
   write_sf(elev_sf, elev_shp_file, delete_layer = TRUE)
@@ -244,6 +253,7 @@ county_sf <- read_sf(dsn = 'data/HW2.gdb', layer = 'County') %>%
 roi_buffered <- st_buffer(roi_sf, dist = 500)
 county_cropped <- county_sf %>%
   st_crop(roi_buffered)
+
 ggplot() +
   theme_minimal() +
   theme(axis.text = element_blank()) +
