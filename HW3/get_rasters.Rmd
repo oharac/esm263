@@ -1,0 +1,43 @@
+---
+title: "get rasters out of geodatabases!"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(raster)
+library(tidyverse)
+### set up arc binding as shown here:
+### https://gis.stackexchange.com/questions/267186/importing-raster-with-r-from-file-geodatabase
+### note, 'arcgisbinding' not 'arcgisbindings'
+library(arcgisbinding)
+arc.check_product()
+dir_asst <- 'H:/ESM263/asst3_submitted'
+```
+
+expand all .7z files (do this on my Mac?)
+
+```{r}
+```
+
+get a list of .gdb paths.  Loop over them.  For each, identify the raster inside, pull it out, save it as a .tif outside the .gdb.
+
+Test with my own gdb:
+```{r}
+test_gdb <- 'H:/ESM263/HW3/output.gdb'
+tmp <- arc.open(test_gdb)
+raster_names <- tmp@children[['RasterDataset']]
+
+if(length(raster_names) > 1) stop('more than one raster!!!!!  ', paste(raster_names, collapse = ', '))
+out_file <- file.path(dirname(test_gdb), paste0(raster_names[1], '.tif'))
+
+r <- arc.open(file.path(test_gdb, raster_names[1])) %>%
+  arc.raster() %>%
+  as.raster()
+
+plot(r)
+message('writing to ', out_file)
+writeRaster(r, out_file, overwrite = TRUE)
+```
+
