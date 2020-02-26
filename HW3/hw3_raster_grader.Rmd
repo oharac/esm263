@@ -41,28 +41,91 @@ for(z in zips) {
 }
 ```
 
+# Get rasters out of geodatabases
+
+Get a list of .gdb paths.  Loop over them.  For each, identify the raster inside, pull it out, save it as a .tif outside the .gdb.
+
+Test with my own gdb:
+```{r, eval = FALSE}
+library(arcgisbinding)
+arc.check_product()
+dir_asst <- 'H:/ESM263/asst3_submitted'
+
+test_gdb <- 'H:/ESM263/HW3/output.gdb'
+tmp <- arc.open(test_gdb)
+raster_names <- tmp@children[['RasterDataset']]
+
+if(length(raster_names) > 1) stop('more than one raster!!!!!  ', paste(raster_names, collapse = ', '))
+out_file <- file.path(dirname(test_gdb), paste0(raster_names[1], '.tif'))
+
+r <- arc.open(file.path(test_gdb, raster_names[1])) %>%
+  arc.raster() %>%
+  as.raster()
+
+plot(r)
+message('writing to ', out_file)
+writeRaster(r, out_file, overwrite = TRUE)
+```
 
 # Check rasters
 
-Use `list.files` to identify all the .img files, including the full path.  
+Use `list.files` to identify all the .tif files, including the full path.  
 
-We can compare each raster to one of two rasters: the "suitable" raster and the "suitable regions" raster.  They should actually both just be covering the same cells so shouldn't matter too much.
+We can compare each student raster to a key raster (mine... haha).  There should be near perfect agreement, though some variation can be expected if only because some students may have chosen different conversions for miles to meters.  Agreement should look like:
 
-Unfortunately, only two students have readily identifiable rasters in their Results.gdb, so unless there is another file that is identifiable as a raster format, this is a waste of time... :(
+* nearly the same number of suitable cells
+* nearly no difference in which cells are noted as suitable
+
+```{r}
+check_rast <- function(student_rast, key_rast, tol = .002) {
+  n_cells_key <- sum(!is.na(values(key_rast)))
+  
+  cellcount_check <- sum(!is.na(values(student_rast)) - n_cells_key) / n_cells_key %>%
+    abs()
+  
+  ### presumably, extents, CRS, and res should be identical, so stack should
+  ### work just fine:
+  s_rast_norm <- student_rast / student_rast
+  k_rast_norm <- key_rast / key_rast
+  tmp_stack <- stack(s_rast_norm, -k_rast_norm)
+  
+  ### take absolute value of difference 
+  diff_rast <- calc(tmp_stack, fun = sum, na.rm = TRUE) %>%
+    abs()
+  
+  celldiff_check <- sum(values(diff_rast), na.rm = TRUE) / n_cells_key
+  
+  check <- celldiff_check <= tol & cellcount_check <= tol
+  
+  return(data.frame(good      = check, 
+                    celldiff  = celldiff_check, 
+                    cellcount = cellcount_check))
+}
+
+```
+
 
 ```{r}
 # dirs <- list.files(dir_asst, full.names = TRUE)
 imgs <- list.files(dir_asst, pattern = '.img$',
                    recursive = TRUE, full.names = TRUE)
 
-good_rast <- x ### need a known "good" raster
+key_rast  <- raster('hw3_arc_outputs/suitable.tif')
+
+score_df <- data.frame()
+
 for(img in imgs) {
   ### img <- imgs[2]
+  student <- basename(dirname(dirname(dirname(img)))) %>%
+    str_replace('_.*', '')
+  
   x <- raster(img)
   values(x)[values(x) <= 0] <- NA
-  # plot(x)
-  # check values against good raster, allowing for small differences here and there
+  
+  check_df <- check_rast(x, key_rast) %>%
+    mutate(student = student)
+  score_df <- score_df %>%
+    bind_rows(check_df)
 }
-
 
 ```

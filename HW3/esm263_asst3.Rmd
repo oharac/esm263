@@ -81,6 +81,51 @@ plot(base_math, col = heat.colors(9))
 
 Click on the tabs to see each model in turn.
 
+### Create function to check rasters against ArcMap outputs
+
+``` {r}
+find_diffs <- function(test_rast, key_rast) {
+  ### normalize both rasters to 1s. 
+  ### Presumably, extents, CRS, and res should be identical, so 
+  ### stack should work just fine:
+  s_rast_norm <- test_rast / test_rast
+  k_rast_norm <- key_rast / key_rast
+  tmp_stack <- stack(s_rast_norm, -k_rast_norm)
+
+  diff_rast <- calc(tmp_stack, fun = sum, na.rm = TRUE)
+  diff_rast[values(diff_rast) == 0] <- NA
+  return(diff_rast)
+}
+
+plot_diffs <- function(test_rast, key_rast, title = NULL) {
+  tmp <- find_diffs(test_rast, key_rast)
+  if(is.null(title)) title <- names(test_rast)
+  plot(tmp, main = title, col = hcl.colors(3, 'Green-Orange'))
+}
+
+check_rast <- function(test_rast, key_rast, tol = .002) {
+  n_cells_key <- sum(!is.na(values(key_rast)))
+  
+  cellcount <- sum(!is.na(values(test_rast)) - n_cells_key)
+  cellcount_check <- cellcount / n_cells_key %>%
+    abs()
+  
+  ### find cells where the two rasters disagree 
+  diff_rast <- find_diffs(test_rast, key_rast) %>%
+    abs()
+  
+  celldiff <- sum(values(diff_rast), na.rm = TRUE)
+  celldiff_check <- celldiff / n_cells_key
+  
+  check <- celldiff_check <= tol & cellcount_check <= tol
+  
+  return(data.frame(good      = check,
+                    diff_tot  = celldiff,
+                    celldiff  = celldiff_check, 
+                    cellcount = cellcount_check))
+}
+```
+
 ### Create wind mask
 
 ![](img/wind.jpg)
@@ -97,8 +142,8 @@ reclass_mtx <- matrix(data = c(c( 1,  2, 3, 4, 5, 6, 7),
                       ncol = 2, byrow = FALSE)
 reclass_mtx
 
-wind_mask <- raster::reclassify(wind_raw_rast, rcl = reclass_mtx)
-plot(wind_mask, main = 'Reclassified wind raster', legend = FALSE)
+wind_mask_rast <- raster::reclassify(wind_raw_rast, rcl = reclass_mtx)
+plot(wind_mask_rast, main = 'Reclassified wind raster', legend = FALSE)
 
 ```
 
@@ -117,14 +162,24 @@ values(wind_mask2)[values(wind_mask2) < 3] <- NA
 wind_mask2 <- wind_mask2 / wind_mask2
 plot(wind_mask2, main = 'Wind mask alt method', legend = FALSE)
 
+compareRaster(wind_mask_rast, wind_mask2, values = TRUE)
+
 ```
 
-The two masks are identical.  Let's write one to `output`:
+The two masks are identical.  Let's compare to what I got in ArcMap:
 
 ```{r}
-identical(wind_mask, wind_mask2)
-writeRaster(wind_mask, 'output/wind_mask.tif', overwrite = TRUE)
+wind_key <- raster('hw3_arc_outputs/wind_mask.tif')
+check_rast(wind_mask_rast, wind_key)
+check_rast(wind_mask2, wind_key)
 ```
+
+And write one to `output`:
+
+```{r}
+writeRaster(wind_mask_rast, 'output/wind_mask.tif', overwrite = TRUE)
+```
+
 
 ### Create road mask
 
@@ -153,17 +208,17 @@ if(!file.exists(road_mask_file)) {
   ### Now, buffer it, union the results (flatten into a single
   ### feature), then intersect it with the County (not necessary,
   ### but why not)
-  roads_mask <- roads_project_sf %>%
+  roads_mask_sf <- roads_project_sf %>%
     st_buffer(dist = 7500) %>%
     st_union(by_feature = FALSE) %>%
     st_intersection(county_sf)
   
-  write_sf(roads_mask, road_mask_file, delete_layer = TRUE)
+  write_sf(roads_mask_sf, road_mask_file, delete_layer = TRUE)
 } else {
-  roads_mask <- read_sf(road_mask_file)
+  roads_mask_sf <- read_sf(road_mask_file)
 }
 
-plot(roads_mask, main = 'Roads mask', legend = FALSE)
+plot(roads_mask_sf, main = 'Roads mask', legend = FALSE)
 ```
 
 But we can also rasterize this.  When putting all the masks together, having them all as rasters can give us some nice advantages.  So let's just do that here while we're at it.  We'll use the `fasterize::fasterize()` function to quickly take the `sf` object and turn it to a raster.
@@ -171,7 +226,7 @@ But we can also rasterize this.  When putting all the masks together, having the
 Why `fasterize()` and not the `raster::rasterize()`?  a) it's faster, by a long shot. b) `rasterize()` sometimes chokes when rasterizing polygons that have holes in them, leaving weird artifacts in the resulting raster that will screw up your analysis.
 
 ```{r}
-roads_mask_rast <- fasterize::fasterize(roads_mask, base_rast)
+roads_mask_rast <- fasterize::fasterize(roads_mask_sf, base_rast)
 
 plot(roads_mask_rast, 
      main = 'Roads mask as raster', legend = FALSE)
@@ -182,6 +237,13 @@ writeRaster(roads_mask_rast, 'output/roads_mask.tif', overwrite = TRUE)
 
 ```
 
+Let's compare to what I got in ArcMap:
+
+```{r}
+roads_key <- raster('hw3_arc_outputs/road_mask.tif')
+check_rast(roads_mask_rast, roads_key)
+plot_diffs(roads_mask_rast, roads_key, title = 'Comparing road rast')
+```
 ### Create urban mask
 
 ![](img/urban.jpg)
@@ -208,27 +270,36 @@ if(!file.exists(urban_mask_file)) {
     st_union()
   
   ### now subtract that from the County layer.
-  urban_mask <- st_difference(county_sf, urban_buffer_sf)
+  urban_mask_sf <- st_difference(county_sf, urban_buffer_sf)
   
-  write_sf(urban_mask, urban_mask_file, delete_layer = TRUE)
+  write_sf(urban_mask_sf, urban_mask_file, delete_layer = TRUE)
 } else {
-  urban_mask <- read_sf(urban_mask_file)
+  urban_mask_sf <- read_sf(urban_mask_file)
 }
 
-plot(urban_mask %>% select('NAME'), 
+plot(urban_mask_sf %>% select('NAME'), 
      main = 'Urban mask', legend = FALSE)
 ```
 
 Again, let's also make a raster version for later.
 
 ```{r}
-urban_mask_rast <- fasterize::fasterize(urban_mask, base_rast)
+urban_mask_rast <- fasterize::fasterize(urban_mask_sf, base_rast)
 
 plot(urban_mask_rast, main = 'Urban mask as raster', legend = FALSE)
 
 writeRaster(urban_mask_rast, 'output/urban_mask.tif', 
             overwrite = TRUE)
 
+```
+
+Let's compare to what I got in ArcMap:
+
+```{r}
+urban_key <- raster('hw3_arc_outputs/urban_mask.tif')
+check_rast(urban_mask_rast, urban_key)
+plot_diffs(urban_mask_rast, urban_key, 
+           title = 'Comparing urban mask buffer method')
 ```
 
 #### replicating the Euclidean Distance version
@@ -250,12 +321,12 @@ urban_rast <- fasterize(urban_sf, base_rast)
 
 ### Now we can use the raster::distance() function to find the
 ### distance away from the urban areas
-urban_dist <- raster::distance(urban_rast)
+urban_dist_rast <- raster::distance(urban_rast)
 
-plot(urban_dist, main = 'Distance from urban areas', legend = FALSE)
+plot(urban_dist_rast, main = 'Distance from urban areas', legend = FALSE)
 ### Now, we can reclassify it (though I'll use the indexing version
 ### because it just seems cleaner to me).  First create a copy
-urban_mask2 <- urban_dist
+urban_mask2 <- urban_dist_rast
 values(urban_mask2)[values(urban_mask2) <= 1609] <- NA
 urban_mask2 <- urban_mask2 / urban_mask2
 
@@ -266,7 +337,7 @@ writeRaster(urban_mask2, 'output/urban_mask2.tif',
             overwrite = TRUE)
 
 plot(urban_mask2, 
-     main = 'Urban mask alt method', legend = FALSE)
+     main = 'Urban mask Euc Dist method', legend = FALSE)
 ```
 
 How do the two raster versions compare?  The `identical()` function means identical in all respects; there's a little difference in the CRS (order of arguments) for some reason, so it will return `FALSE`.  Instead, let's compare the values by plotting one on top of the other.
@@ -277,6 +348,15 @@ plot(urban_mask_rast, col = 'blue', legend = FALSE, add = TRUE)
 ```
 
 You can see tiny rings of red, showing that the `distance()` version has a slight difference from the `st_buffer()` version.  How important is this difference to our analysis?  A one-mile buffer seems sort of arbitrary, so a little difference one way or the other is probably not a deal-killer.
+
+Let's compare to what I got in ArcMap:
+
+```{r}
+urban_key <- raster('hw3_arc_outputs/urban_mask.tif')
+check_rast(urban_mask2, urban_key)
+plot_diffs(urban_mask2, urban_key, 
+           title = 'Comparing urban mask Euc Dist method')
+```
 
 It may be that neither of these perfectly matches the output from ArcMap, either.  There are small variations in how rasterizing algorithms decide which cells to keep, which to drop, and probably in how the distance is measured. Remember that rasters are always an approximation, and we're looking at cell sizes on the order of a city block.
 
@@ -308,21 +388,21 @@ if(!file.exists(public_mask_file)) {
     st_union(by_feature = FALSE)
            
   ### Subtract that from the County layer.
-  public_mask <- st_difference(county_sf, parcels_public)
+  public_mask_sf <- st_difference(county_sf, parcels_public)
   
-  write_sf(public_mask, public_mask_file, delete_layer = TRUE)
+  write_sf(public_mask_sf, public_mask_file, delete_layer = TRUE)
 } else {
-  public_mask <- read_sf(public_mask_file)
+  public_mask_sf <- read_sf(public_mask_file)
 }
 
-plot(public_mask %>% select('NAME'), 
+plot(public_mask_sf %>% select('NAME'), 
      main = 'Public mask', legend = FALSE)
 ```
 
 And yet again, let's also make a raster version for later.
 
 ```{r}
-public_mask_rast <- fasterize::fasterize(public_mask, base_rast)
+public_mask_rast <- fasterize::fasterize(public_mask_sf, base_rast)
 
 plot(public_mask_rast, main = 'Public mask as raster', legend = FALSE)
 
@@ -363,21 +443,21 @@ if(!file.exists(fire_mask_file)) {
     st_union(fire_sra_filtered_sf)   ### 
            
   ### Subtract that from the County layer.
-  fire_mask <- st_difference(county_sf, fire_joined_sf)
+  fire_mask_sf <- st_difference(county_sf, fire_joined_sf)
   
-  write_sf(fire_mask, fire_mask_file, delete_layer = TRUE)
+  write_sf(fire_mask_sf, fire_mask_file, delete_layer = TRUE)
 } else {
-  fire_mask <- read_sf(fire_mask_file)
+  fire_mask_sf <- read_sf(fire_mask_file)
 }
 
-plot(fire_mask %>% select('NAME'), 
+plot(fire_mask_sf %>% select('NAME'), 
      main = 'Fire mask', legend = FALSE)
 ```
 
 And the raster version.
 
 ```{r}
-fire_mask_rast <- fasterize::fasterize(fire_mask, base_rast)
+fire_mask_rast <- fasterize::fasterize(fire_mask_sf, base_rast)
 
 plot(fire_mask_rast, main = 'Fire mask as raster', legend = FALSE)
 
@@ -404,27 +484,34 @@ if(!file.exists(airport_mask_file)) {
     st_union(by_feature = FALSE)
   
   ### Subtract that from the County layer.
-  airport_mask <- st_difference(county_sf, airport_buffer_sf)
+  airport_mask_sf <- st_difference(county_sf, airport_buffer_sf)
   
-  write_sf(airport_mask, airport_mask_file, delete_layer = TRUE)
+  write_sf(airport_mask_sf, airport_mask_file, delete_layer = TRUE)
 } else {
-  airport_mask <- read_sf(airport_mask_file)
+  airport_mask_sf <- read_sf(airport_mask_file)
 }
 
-plot(airport_mask %>% select('NAME'), 
+plot(airport_mask_sf %>% select('NAME'), 
      main = 'airport mask', legend = FALSE)
 ```
 
 And the raster version.
 
 ```{r}
-airport_mask_rast <- fasterize::fasterize(airport_mask, base_rast)
+airport_mask_rast <- fasterize::fasterize(airport_mask_sf, base_rast)
 
 plot(airport_mask_rast, main = 'Airport mask as raster', legend = FALSE)
 
 writeRaster(airport_mask_rast, 'output/airport_mask.tif', 
             overwrite = TRUE)
 
+```
+
+```{r}
+airport_key <- raster('hw3_arc_outputs/airport_mask.tif')
+check_rast(airport_mask_rast, airport_key)
+plot_diffs(airport_mask_rast, airport_key, 
+           title = 'Comparing airport mask')
 ```
 
 ## Extract from Mask
@@ -435,15 +522,26 @@ Note, the order of masks doesn't matter, since we're just looking for places whe
 
 ```{r}
 
-results_rast <- wind_mask %>%
-  raster::mask(roads_mask) %>%
-  mask(fire_mask) %>%
-  mask(urban_mask) %>%
-  mask(airport_mask) %>%
-  mask(public_mask)
+all_mask_rast <- wind_mask_rast %>%
+  raster::mask(roads_mask_sf) %>%
+  mask(fire_mask_sf) %>%
+  mask(urban_mask_sf) %>%
+  mask(airport_mask_sf) %>%
+  mask(public_mask_sf)
 
-plot(results_rast)
+writeRaster(all_mask_rast, 'output/suitable_mask.tif', overwrite = TRUE)
+
+plot(all_mask_rast)
 ```
+
+Check it against ArcMap results:
+```{r}
+suitable_key <- raster('hw3_arc_outputs/suitable.tif')
+check_rast(all_mask_rast, suitable_key)
+plot_diffs(all_mask_rast, suitable_key, 
+           title = 'Comparing suitability results, mask method')
+```
+
 
 We can also use all those rasters we created, and turn them into a `RasterStack` object, layering them all together, allowing us to do quick calculations on the cell values.  Some of the things you can do with a `RasterStack` are using `raster::calc()` to sum up all the values for each cell, or multiply them, or find a mean or standard deviation.  Here we'll try two things:
 
@@ -461,25 +559,19 @@ mask_stack <- raster::stack(wind_mask,
 mask_product <- mask_stack %>%
   raster::calc(fun = prod)
 plot(mask_product, main = 'Mask product', legend = FALSE)
+writeRaster(mask_product, 'output/suitable_stack.tif', overwrite = TRUE)
 
 mask_sum <- mask_stack %>%
   raster::calc(fun = sum, na.rm = TRUE)
 plot(mask_sum, main = 'Mask sum', legend = TRUE)
 ```
 
-### Checking the two processes
-
-We already know that some of the masks are slightly different based on which method was used to create the mask.  Let's see how the final rasters compare:
-
+Check it against ArcMap results:
 ```{r}
-plot(fire_mask_rast, col = '#ffff44', legend = FALSE)
-plot(results_rast, col = 'red', add = TRUE)
-# plot(mask_product, col = '#00ff007f', add = TRUE)
-plot(fire_mask, fill = NA, add = TRUE)
-# urban_mask_rast,
-# public_mask_rast,
-# airport_mask_rast,
-# fire_mask_rast
+suitable_key <- raster('hw3_arc_outputs/suitable.tif')
+check_rast(mask_product, suitable_key)
+plot_diffs(mask_product, suitable_key, 
+           title = 'Comparing suitability results, stack method')
 ```
 
 ## Analyzing the results
@@ -522,7 +614,6 @@ ggplot() +
   theme(axis.text = element_blank(),
         axis.title = element_blank()) +
   geom_sf(data = county_sf, fill = 'grey30', color = 'yellow') +
-  geom_sf(data = )
   geom_raster(data = results_ranked_pts, aes(x = x, y = y, fill = rank)) +
   scale_fill_viridis_d()
 ```
