@@ -4,8 +4,8 @@ author: "Casey O'Hara"
 date: "2/21/2020"
 output: 
   html_document:
-    toc: yes
-    number_sections: yes
+    toc: no
+    number_sections: no
     code_folding: show
 ---
 
@@ -45,10 +45,10 @@ As in other assignments, there are a few ways to do some of these steps, so I'll
 base_rast <- raster('data/Wind2002.tif')
 base_rast
 
-# st_layers('data/basemap.gdb')
-county_sf <- read_sf(dsn = 'data/basemap.gdb', layer = 'County')
-rivers_sf <- read_sf(dsn = 'data/basemap.gdb', layer = 'MajorRivers')
-cities_sf <- read_sf(dsn = 'data/basemap.gdb', layer = 'Cities')
+# st_layers('data/Basemap.gdb')
+county_sf <- read_sf(dsn = 'data/Basemap.gdb', layer = 'County')
+rivers_sf <- read_sf(dsn = 'data/Basemap.gdb', layer = 'MajorRivers')
+cities_sf <- read_sf(dsn = 'data/Basemap.gdb', layer = 'Cities')
 roads_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'CenterLines2008')
 
 ### also set the preferred CRS, CA Teale Albers NAD 1987 in meters.
@@ -153,7 +153,9 @@ But we can also use vector indexing to directly replace the values too!
 ### first make a copy of the wind_raw_rast so we can change it
 wind_mask2 <- wind_raw_rast
 
+### turn low wind values to NA:
 values(wind_mask2)[values(wind_mask2) < 3] <- NA
+
 ### note, we haven't changed the other values to 1 yet; technically
 ### that's fine - a mask really only needs to have data cells and
 ### NA cells.  But let's change them anyway - here's a trick I like to
@@ -177,6 +179,9 @@ check_rast(wind_mask2, wind_key)
 And write one to `output`:
 
 ```{r}
+### use compareRaster to compare aspects of the rasters; all.equal is a wrapper
+### around compareRaster that compares all aspects of the rasters.
+all.equal(wind_mask, wind_mask2) 
 writeRaster(wind_mask_rast, 'output/wind_mask.tif', overwrite = TRUE)
 ```
 
@@ -207,7 +212,7 @@ if(!file.exists(road_mask_file)) {
   
   ### Now, buffer it, union the results (flatten into a single
   ### feature), then intersect it with the County (not necessary,
-  ### but why not)
+  ### but why not, trims off the buffer that extends beyond the county line)
   roads_mask_sf <- roads_project_sf %>%
     st_buffer(dist = 7500) %>%
     st_union(by_feature = FALSE) %>%
@@ -255,6 +260,18 @@ We can do this process in a similar way we did the roads, using `st_buffer` to c
 * Subtract that from the County polygon using `st_difference()`.
 * Let's save it as a geopackage rather than a shapefile.
 
+Note that I encountered an error:
+```
+Error in CPL_geos_op2(op, st_geometry(x), st_geometry(y)) : 
+   Evaluation error: TopologyException: Input geom 1 is invalid: 
+   Ring Self-intersection at or near point ...
+```
+
+These are caused by tiny mistakes in the shapefile that are pretty much impossible to spot visually, where two polygon vertices land right on top of each other.  There are some tests built into `sf`: `st_is_valid()`, `st_is_simple()` that will return `TRUE` or `FALSE` for each feature in the polygon set.  We can use these to find the errors... but sometimes our manipulations (`st_union()`, `st_intersect()` etc) cause new glitches.
+
+An easy (but not intuitive) trick can help fix invalid geometries: adding a zero-distance buffer (`st_buffer(x, dist = 0)`).
+
+
 ```{r}
 urban_mask_file <- 'output/urban_mask.gpkg'
 
@@ -263,9 +280,15 @@ if(!file.exists(urban_mask_file)) {
   urban_2001_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'Urban2001')
   urban_2020_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'Urban2020')
   
+  # st_is_valid(urban_2001_sf) ### these all look good
+  # st_is_valid(urban_2020_sf) ### looks like some invalid geometries in there
+  ### can we get around the error by putting a zero buffer on the urban_2020 layer?
+  urban_2020_fix <- urban_2020_sf %>% st_buffer(dist = 0)
+  # st_is_valid(urban_2020_fix) ### all are valid now!
+
   ### union the two layers, then make a buffer, then flatten that
   ### using union with only one argument
-  urban_buffer_sf <- st_union(urban_2001_sf, urban_2020_sf) %>%
+  urban_buffer_sf <- st_union(urban_2001_sf, urban_2020_fix) %>%
     st_buffer(dist = 1609) %>%
     st_union()
   
@@ -305,16 +328,20 @@ plot_diffs(urban_mask_rast, urban_key,
 #### replicating the Euclidean Distance version
 
 We can do something like the Euclidean Distance tool here.  The `raster::distance()` function takes a raster input (not a line or polygon feature) and replaces empty spaces (`NA` values) with the distance to the nearest non-NA cell.  Since the urban zones are polygons, we can rasterize those, then use the `distance()` function.  It's a little clunky but I wanted to show that it can be done.
+
+As noted before, we'll need to fix the invalid geometry in the urban 2020 polygons.
+
 ```{r}
 # st_layers('data/HW3.gdb')
 urban_2001_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'Urban2001')
 urban_2020_sf <- read_sf(dsn = 'data/HW3.gdb', layer = 'Urban2020')
+urban_2020_fix <- urban_2020_sf %>% st_buffer(dist = 0)
 
 ### union the two layers to a single feature.  The
 ### fasterize() function requires it to be a MULTIPOLYGON geometry,
 ### but for some reason st_union creates a generic geometry, so
 ### I'll use st_cast() to force it back to MULTIPOLYGON
-urban_sf <- st_union(urban_2001_sf, urban_2020_sf) %>%
+urban_sf <- st_union(urban_2001_sf, urban_2020_fix) %>%
   st_cast('MULTIPOLYGON')
 
 urban_rast <- fasterize(urban_sf, base_rast)
@@ -340,9 +367,11 @@ plot(urban_mask2,
      main = 'Urban mask Euc Dist method', legend = FALSE)
 ```
 
-How do the two raster versions compare?  The `identical()` function means identical in all respects; there's a little difference in the CRS (order of arguments) for some reason, so it will return `FALSE`.  Instead, let's compare the values by plotting one on top of the other.
+How do the two raster versions compare?  The `all.equal()` function tells us they're not identical; we could try `compareRaster()` and .  Instead, let's compare the values by plotting one on top of the other.
 
 ```{r}
+all.equal(urban_mask2, urban_mask_rast) ### FALSE!  not equal.
+# compareRaster(urban_mask2, urban_mask_rast, values = TRUE) ### error: not all values equal
 plot(urban_mask2, col = 'red', legend = FALSE)
 plot(urban_mask_rast, col = 'blue', legend = FALSE, add = TRUE)
 ```
@@ -640,7 +669,7 @@ ggplot() +
   geom_sf(data = results_ranked_poly, aes(fill = rank), 
           show.legend = FALSE,
           color = 'yellow', size = .1) +
-  geom_sf_text(data = cities_sf, aes(label = CITY), color = 'grey80', size = 2) +
+  geom_sf_text(data = cities_sf, aes(label = CITY), color = 'grey90', size = 2.5) +
   geom_sf_text(data = results_ranked_poly, aes(label = rank), color = 'white', size = 5) +
   scale_fill_viridis_d()
 ```
