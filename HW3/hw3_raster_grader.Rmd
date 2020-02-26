@@ -1,0 +1,68 @@
+---
+title: "HW3 raster grader"
+author: "Casey O'Hara"
+date: "2/24/2020"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+library(raster) 
+library(tidyverse)
+### load raster before tidyverse! otherwise the raster::select (which I
+### never use) masks dplyr::select, which I use all the time
+library(DT)
+
+### directory where assignments are saved
+dir_asst <- '~/Desktop/esm263_asst3' 
+
+### directory where .gdbs are stored
+dir_gdb  <- '~Desktop/esm263_asst3_gdb'
+
+```
+
+# Unzip the .7z files to get the .gdb
+
+```{r, eval = FALSE}
+zips <- list.files(dir_asst, pattern = '.7z$',
+                    full.names = TRUE, recursive = TRUE)
+for(z in zips) {
+  # z <- zips[1]
+  gdb_file <- list.files(dirname(z), pattern = '.gdb', full.names = TRUE)
+  if(length(gdb_file) > 0) {
+    message('File exists: ', gdb_file, '\n... skipping extract!')
+    # unlink(gdb_file, recursive = TRUE, force = TRUE)
+    next()
+  }
+  message('Unzipping ', basename(z))
+  system2(command = '7z',
+          args = sprintf('x "%s" -o"%s/"', z, dirname(z)))
+}
+```
+
+
+# Check rasters
+
+Use `list.files` to identify all the .img files, including the full path.  
+
+We can compare each raster to one of two rasters: the "suitable" raster and the "suitable regions" raster.  They should actually both just be covering the same cells so shouldn't matter too much.
+
+Unfortunately, only two students have readily identifiable rasters in their Results.gdb, so unless there is another file that is identifiable as a raster format, this is a waste of time... :(
+
+```{r}
+# dirs <- list.files(dir_asst, full.names = TRUE)
+imgs <- list.files(dir_asst, pattern = '.img$',
+                   recursive = TRUE, full.names = TRUE)
+
+good_rast <- x ### need a known "good" raster
+for(img in imgs) {
+  ### img <- imgs[2]
+  x <- raster(img)
+  values(x)[values(x) <= 0] <- NA
+  # plot(x)
+  # check values against good raster, allowing for small differences here and there
+}
+
+
+```
