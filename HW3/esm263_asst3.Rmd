@@ -97,10 +97,10 @@ find_diffs <- function(test_rast, key_rast) {
   return(diff_rast)
 }
 
-plot_diffs <- function(test_rast, key_rast, title = NULL) {
+plot_diffs <- function(test_rast, key_rast, title = NULL, pal = 'Green-Orange') {
   tmp <- find_diffs(test_rast, key_rast)
   if(is.null(title)) title <- names(test_rast)
-  plot(tmp, main = title, col = hcl.colors(3, 'Green-Orange'))
+  plot(tmp, main = title, col = hcl.colors(3, pal))
 }
 
 check_rast <- function(test_rast, key_rast, tol = .002) {
@@ -181,7 +181,7 @@ And write one to `output`:
 ```{r}
 ### use compareRaster to compare aspects of the rasters; all.equal is a wrapper
 ### around compareRaster that compares all aspects of the rasters.
-all.equal(wind_mask, wind_mask2) 
+all.equal(wind_mask_rast, wind_mask2) 
 writeRaster(wind_mask_rast, 'output/wind_mask.tif', overwrite = TRUE)
 ```
 
@@ -578,7 +578,7 @@ We can also use all those rasters we created, and turn them into a `RasterStack`
 * add all the rasters together, with `na.rm = TRUE`.  This will not mask per se, but will instead tell us how many of the criteria are suitable for each cell.
 
 ```{r}
-mask_stack <- raster::stack(wind_mask, 
+mask_stack <- raster::stack(wind_mask_rast, 
                             roads_mask_rast,
                             urban_mask_rast,
                             public_mask_rast,
@@ -600,7 +600,8 @@ Check it against ArcMap results:
 suitable_key <- raster('hw3_arc_outputs/suitable.tif')
 check_rast(mask_product, suitable_key)
 plot_diffs(mask_product, suitable_key, 
-           title = 'Comparing suitability results, stack method')
+           title = 'Comparing suitability results, stack method',
+           pal = 'Viridis')
 ```
 
 ## Analyzing the results
