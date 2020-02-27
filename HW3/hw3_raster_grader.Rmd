@@ -34,9 +34,11 @@ for(z in zips) {
   # z <- zips[1]
   gdb_file <- list.files(dirname(z), pattern = '.gdb', full.names = TRUE)
   if(length(gdb_file) > 0) {
-    message('File exists: ', gdb_file, '\n... skipping extract!')
+    # message('File exists: ', gdb_file, '\n... deleting existing to overwrite!')
     # unlink(gdb_file, recursive = TRUE, force = TRUE)
-    next()
+    message('File exists: ', gdb_file, '\n... skipping extract!')
+    unlink(gdb_file, recursive = TRUE, force = TRUE)
+    # next()
   }
   message('Unzipping ', basename(z))
   system2(command = 'C:\\Program Files\\7-Zip\\7z.exe',
@@ -67,7 +69,7 @@ problems <- paste(c('Janelle', # nothing in gdb
 gdbs_fixed <- gdbs[!str_detect(gdbs, problems)]
 
 for(gdb in gdbs_fixed) {
-  ### gdb <- gdbs[23]
+  ### gdb <- gdbs[48]
   cat('getting raster from ', gdb, '\n')
   tmp <- arc.open(gdb)
   raster_names <- tmp@children[['RasterDataset']]
@@ -161,7 +163,7 @@ key_rast  <- raster('hw3_arc_outputs/suitable.tif')
 score_df <- data.frame()
 
 for(tif in tifs) {
-  # tif <- tifs[29]
+  # tif <- tifs[46]
   student <- basename(dirname(tif)) %>%
     str_replace('_.*', '')
   
@@ -180,17 +182,21 @@ for(tif in tifs) {
 DT::datatable(score_df)
 
 ### people to check with:
-### ..Kat Leigh (27): wrong extent, wrong resolution, major issues
-### ..Leana (31):     wrong CRS via processing extent settings?
-### .Rachel (38):     wrong CRS via processing extent settings?
+### ..Kat Leigh : wrong extent, wrong resolution, major issues (fixed)
+### ..Leana :     wrong CRS via processing extent settings? (fixed)
+### .Rachel :     wrong CRS via processing extent settings?
 
-### ..Benson (10) - missing some areas
-### ..Gabriel (16) - lots missing - maybe wind classes?
-### ..Gavi (17) - small amount missing (no points off if fixed)
-### .Juan E (24) - small mask issue? (no points off if fixed)
-### ..Waldo (44) - wrong wind classes
-### ..Ruben (41) - dropped a lot of areas - mask issues?
-### ..Tyler (44) - one or more masks is very wrong
-### ..Keene (29) - small problem with a mask (no points off if fixed)
+### ..Benson  - missing some areas (fixed)
+### ..Gabriel  - lots missing - maybe wind classes? (fixed) - still has urban mask issues
+### ..Gavi  - small amount missing (no points off, fixed)
+### .Juan E  - small mask issue? (no points off if fixed)
+### ..Waldo  - wrong wind classes (fixed)
+### ..Ruben  - dropped a lot of areas - mask issues?
+### ..Tyler  - one or more masks is very wrong (fixed in class, but not in gdb)
+### ..Keene  - small problem with a mask (no points off, fixed)
+
+### julia - urban mask issue... small difference, ok
+### joanne - still issues with raster not in results.gdb
+
 
 ```
