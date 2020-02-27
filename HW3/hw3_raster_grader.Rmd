@@ -15,18 +15,21 @@ library(tidyverse)
 library(DT)
 
 ### directory where assignments are saved
-dir_asst <- '~/Desktop/esm263_asst3' 
+# dir_asst <- '~/Desktop/esm263_asst3' 
+dir_asst <- 'H:/ESM263/HW3_submissions'
 
 ### directory where .gdbs are stored
-dir_gdb  <- '~Desktop/esm263_asst3_gdb'
+dir_gdb  <- '~/Desktop/esm263_asst3_gdb'
 
 ```
 
 # Unzip the .7z files to get the .gdb
 
 ```{r, eval = FALSE}
-zips <- list.files(dir_asst, pattern = '.7z$',
+
+zips <- list.files('H:/ESM263/HW3_submissions', pattern = '.7z$',
                     full.names = TRUE, recursive = TRUE)
+
 for(z in zips) {
   # z <- zips[1]
   gdb_file <- list.files(dirname(z), pattern = '.gdb', full.names = TRUE)
@@ -36,35 +39,59 @@ for(z in zips) {
     next()
   }
   message('Unzipping ', basename(z))
-  system2(command = '7z',
+  system2(command = 'C:\\Program Files\\7-Zip\\7z.exe',
           args = sprintf('x "%s" -o"%s/"', z, dirname(z)))
 }
 ```
 
 # Get rasters out of geodatabases
 
-Get a list of .gdb paths.  Loop over them.  For each, identify the raster inside, pull it out, save it as a .tif outside the .gdb.
+Get a list of .gdb paths.  Loop over them.  For each, identify the raster inside, pull it out, save it as a .tif outside the .gdb (in the directory just upstairs from it)
 
-Test with my own gdb:
 ```{r, eval = FALSE}
 library(arcgisbinding)
 arc.check_product()
-dir_asst <- 'H:/ESM263/asst3_submitted'
+dir_asst <- 'H:/ESM263/HW3_submissions'
 
-test_gdb <- 'H:/ESM263/HW3/output.gdb'
-tmp <- arc.open(test_gdb)
-raster_names <- tmp@children[['RasterDataset']]
+student_dirs <- list.files(dir_asst)
+gdbs <- list.files(dir_asst, pattern = '.gdb$',
+                   include.dirs = TRUE,
+                   full.names = TRUE, recursive = TRUE)
 
-if(length(raster_names) > 1) stop('more than one raster!!!!!  ', paste(raster_names, collapse = ', '))
-out_file <- file.path(dirname(test_gdb), paste0(raster_names[1], '.tif'))
+missing <- student_dirs[!student_dirs %in% basename(dirname(gdbs))]
 
-r <- arc.open(file.path(test_gdb, raster_names[1])) %>%
-  arc.raster() %>%
-  as.raster()
+problems <- paste(c('Jaleise', # failed to connect to database
+                    'Janelle', # nothing in gdb
+                    'Joanne',  # was polygon - exported out of .gdb
+                    'Julia',   # invalid raster data set
+                    'Nicole',  # nothing in gdb
+                    'Zoe'),    # was polygon of top ten sites - exported out of .gdb
+                  collapse = '|')
 
-plot(r)
-message('writing to ', out_file)
-writeRaster(r, out_file, overwrite = TRUE)
+gdbs_fixed <- gdbs[!str_detect(gdbs, problems)]
+
+for(gdb in gdbs_fixed) {
+  ### gdb <- gdbs[51]
+  cat('getting raster from ', gdb, '\n')
+  tmp <- arc.open(gdb)
+  raster_names <- tmp@children[['RasterDataset']]
+  
+  if(length(raster_names) > 1) cat('more than one raster!!!!!  ', gdb, '\n  ', paste(raster_names, collapse = ', '), '\n')
+  if(length(raster_names) == 0) stop('no raster!!!!!  ', gdb)
+  out_file <- file.path(dirname(gdb), paste0(raster_names[1], '.tif'))
+  if(file.exists(out_file)) {
+    cat('File exists: ', out_file, '... skipping!\n')
+    next()
+  }
+  
+  r <- arc.open(file.path(gdb, raster_names[1])) %>%
+    arc.raster() %>%
+    as.raster()
+  
+  # plot(r)
+  cat('writing to ', out_file, '\n')
+  writeRaster(r, out_file, overwrite = TRUE)
+}
 ```
 
 # Check rasters
@@ -76,50 +103,76 @@ We can compare each student raster to a key raster (mine... haha).  There should
 * nearly the same number of suitable cells
 * nearly no difference in which cells are noted as suitable
 
-```{r}
-check_rast <- function(student_rast, key_rast, tol = .002) {
-  n_cells_key <- sum(!is.na(values(key_rast)))
-  
-  cellcount_check <- sum(!is.na(values(student_rast)) - n_cells_key) / n_cells_key %>%
-    abs()
-  
-  ### presumably, extents, CRS, and res should be identical, so stack should
-  ### work just fine:
-  s_rast_norm <- student_rast / student_rast
+``` {r}
+find_diffs <- function(test_rast, key_rast) {
+  ### normalize both rasters to 1s. 
+  ### Presumably, extents, CRS, and res should be identical, so 
+  ### stack should work just fine:
+  s_rast_norm <- test_rast / test_rast
   k_rast_norm <- key_rast / key_rast
   tmp_stack <- stack(s_rast_norm, -k_rast_norm)
+
+  diff_rast <- calc(tmp_stack, fun = sum, na.rm = TRUE)
+  diff_rast[values(diff_rast) == 0] <- NA
+  return(diff_rast)
+}
+
+plot_diffs <- function(test_rast, key_rast, title = NULL, pal = 'Green-Orange') {
+  tmp <- find_diffs(test_rast, key_rast)
+  if(is.null(title)) title <- names(test_rast)
+  plot(tmp, main = title, col = hcl.colors(3, pal))
+}
+
+check_rast <- function(test_rast, key_rast, tol = .003) {
+  if(!compareRaster(test_rast, key_rast, stopiffalse = FALSE)) {
+    ### check extent, CRS, res but not values - if no match, go here
+    return(data.frame(good      = FALSE,
+                      diff_tot  = NA,
+                      celldiff  = -1, 
+                      cellcount = -1))   
+  }
+  n_cells_key <- sum(!is.na(values(key_rast)))
   
-  ### take absolute value of difference 
-  diff_rast <- calc(tmp_stack, fun = sum, na.rm = TRUE) %>%
+  cellcount <- sum(!is.na(values(test_rast))) - n_cells_key
+  cellcount_check <- (cellcount / n_cells_key) %>%
     abs()
   
-  celldiff_check <- sum(values(diff_rast), na.rm = TRUE) / n_cells_key
+  ### find cells where the two rasters disagree 
+  diff_rast <- find_diffs(test_rast, key_rast) %>%
+    abs()
+  
+  celldiff <- sum(values(diff_rast), na.rm = TRUE)
+  celldiff_check <- celldiff / n_cells_key
   
   check <- celldiff_check <= tol & cellcount_check <= tol
   
-  return(data.frame(good      = check, 
+  return(data.frame(good      = check,
+                    diff_tot  = celldiff,
                     celldiff  = celldiff_check, 
                     cellcount = cellcount_check))
 }
-
 ```
+
 
 
 ```{r}
 # dirs <- list.files(dir_asst, full.names = TRUE)
-imgs <- list.files(dir_asst, pattern = '.img$',
+tifs <- list.files(dir_asst, pattern = '.tif$',
                    recursive = TRUE, full.names = TRUE)
 
 key_rast  <- raster('hw3_arc_outputs/suitable.tif')
 
 score_df <- data.frame()
 
-for(img in imgs) {
-  ### img <- imgs[2]
-  student <- basename(dirname(dirname(dirname(img)))) %>%
+for(tif in tifs) {
+  # tif <- tifs[28]
+  student <- basename(dirname(tif)) %>%
     str_replace('_.*', '')
   
-  x <- raster(img)
+  x <- raster(tif)
+  # x; key_rast
+  # x <- x %>% projectRaster(key_rast)
+  # plot(x);  plot(key_rast)
   values(x)[values(x) <= 0] <- NA
   
   check_df <- check_rast(x, key_rast) %>%
@@ -127,5 +180,21 @@ for(img in imgs) {
   score_df <- score_df %>%
     bind_rows(check_df)
 }
+
+DT::datatable(score_df)
+
+### people to check with:
+### .Kat Leigh (27): wrong extent, wrong resolution, major issues
+### .Leana (31):  wrong CRS via processing extent settings?
+### .Rachel (38):   wrong CRS via processing extent settings?
+
+### .Benson (10) - missing some areas
+### .Gabriel (16) - lots missing - maybe wind classes?
+### .Gavi (17) - small amount missing (no points off if fixed)
+### .Juan E (24) - small mask issue? (no points off if fixed)
+### .Waldo (44) - wrong wind classes
+### .Ruben (40) - dropped a lot of areas - mask issues?
+### .Tyler (43) - one or more masks is very wrong
+### .Keene (28) - small problem with a mask (no points off if fixed)
 
 ```
