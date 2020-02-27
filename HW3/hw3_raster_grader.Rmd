@@ -60,18 +60,14 @@ gdbs <- list.files(dir_asst, pattern = '.gdb$',
 
 missing <- student_dirs[!student_dirs %in% basename(dirname(gdbs))]
 
-problems <- paste(c('Jaleise', # failed to connect to database
-                    'Janelle', # nothing in gdb
-                    'Joanne',  # was polygon - exported out of .gdb
-                    'Julia',   # invalid raster data set
-                    'Nicole',  # nothing in gdb
-                    'Zoe'),    # was polygon of top ten sites - exported out of .gdb
+problems <- paste(c('Janelle', # nothing in gdb
+                    'Nicole'),  # nothing in gdb
                   collapse = '|')
 
 gdbs_fixed <- gdbs[!str_detect(gdbs, problems)]
 
 for(gdb in gdbs_fixed) {
-  ### gdb <- gdbs[51]
+  ### gdb <- gdbs[23]
   cat('getting raster from ', gdb, '\n')
   tmp <- arc.open(gdb)
   raster_names <- tmp@children[['RasterDataset']]
@@ -165,7 +161,7 @@ key_rast  <- raster('hw3_arc_outputs/suitable.tif')
 score_df <- data.frame()
 
 for(tif in tifs) {
-  # tif <- tifs[28]
+  # tif <- tifs[29]
   student <- basename(dirname(tif)) %>%
     str_replace('_.*', '')
   
@@ -184,17 +180,17 @@ for(tif in tifs) {
 DT::datatable(score_df)
 
 ### people to check with:
-### .Kat Leigh (27): wrong extent, wrong resolution, major issues
-### .Leana (31):  wrong CRS via processing extent settings?
-### .Rachel (38):   wrong CRS via processing extent settings?
+### ..Kat Leigh (27): wrong extent, wrong resolution, major issues
+### ..Leana (31):     wrong CRS via processing extent settings?
+### .Rachel (38):     wrong CRS via processing extent settings?
 
-### .Benson (10) - missing some areas
-### .Gabriel (16) - lots missing - maybe wind classes?
-### .Gavi (17) - small amount missing (no points off if fixed)
+### ..Benson (10) - missing some areas
+### ..Gabriel (16) - lots missing - maybe wind classes?
+### ..Gavi (17) - small amount missing (no points off if fixed)
 ### .Juan E (24) - small mask issue? (no points off if fixed)
-### .Waldo (44) - wrong wind classes
-### .Ruben (40) - dropped a lot of areas - mask issues?
-### .Tyler (43) - one or more masks is very wrong
-### .Keene (28) - small problem with a mask (no points off if fixed)
+### ..Waldo (44) - wrong wind classes
+### ..Ruben (41) - dropped a lot of areas - mask issues?
+### ..Tyler (44) - one or more masks is very wrong
+### ..Keene (29) - small problem with a mask (no points off if fixed)
 
 ```
