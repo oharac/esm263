@@ -102,53 +102,7 @@ We can compare each student raster to a key raster (mine... haha).  There should
 * nearly no difference in which cells are noted as suitable
 
 ``` {r}
-find_diffs <- function(test_rast, key_rast) {
-  ### normalize both rasters to 1s. 
-  ### Presumably, extents, CRS, and res should be identical, so 
-  ### stack should work just fine:
-  s_rast_norm <- test_rast / test_rast
-  k_rast_norm <- key_rast / key_rast
-  tmp_stack <- stack(s_rast_norm, -k_rast_norm)
-
-  diff_rast <- calc(tmp_stack, fun = sum, na.rm = TRUE)
-  diff_rast[values(diff_rast) == 0] <- NA
-  return(diff_rast)
-}
-
-plot_diffs <- function(test_rast, key_rast, title = NULL, pal = 'Green-Orange') {
-  tmp <- find_diffs(test_rast, key_rast)
-  if(is.null(title)) title <- names(test_rast)
-  plot(tmp, main = title, col = hcl.colors(3, pal))
-}
-
-check_rast <- function(test_rast, key_rast, tol = .003) {
-  if(!compareRaster(test_rast, key_rast, stopiffalse = FALSE)) {
-    ### check extent, CRS, res but not values - if no match, go here
-    return(data.frame(good      = FALSE,
-                      diff_tot  = NA,
-                      celldiff  = -1, 
-                      cellcount = -1))   
-  }
-  n_cells_key <- sum(!is.na(values(key_rast)))
-  
-  cellcount <- sum(!is.na(values(test_rast))) - n_cells_key
-  cellcount_check <- (cellcount / n_cells_key) %>%
-    abs()
-  
-  ### find cells where the two rasters disagree 
-  diff_rast <- find_diffs(test_rast, key_rast) %>%
-    abs()
-  
-  celldiff <- sum(values(diff_rast), na.rm = TRUE)
-  celldiff_check <- celldiff / n_cells_key
-  
-  check <- celldiff_check <= tol & cellcount_check <= tol
-  
-  return(data.frame(good      = check,
-                    diff_tot  = celldiff,
-                    celldiff  = celldiff_check, 
-                    cellcount = cellcount_check))
-}
+source('helper_fxns.R') ### raster checking functions
 ```
 
 
@@ -170,7 +124,7 @@ for(tif in tifs) {
   x <- raster(tif)
   # x; key_rast
   # x <- x %>% projectRaster(key_rast)
-  # plot(x);  plot(key_rast)
+  # plot_diffs(x, key_rast)
   values(x)[values(x) <= 0] <- NA
   
   check_df <- check_rast(x, key_rast) %>%
@@ -180,23 +134,5 @@ for(tif in tifs) {
 }
 
 DT::datatable(score_df)
-
-### people to check with:
-### ..Kat Leigh : wrong extent, wrong resolution, major issues (fixed)
-### ..Leana :     wrong CRS via processing extent settings? (fixed)
-### .Rachel :     wrong CRS via processing extent settings?
-
-### ..Benson  - missing some areas (fixed)
-### ..Gabriel  - lots missing - maybe wind classes? (fixed) - still has urban mask issues
-### ..Gavi  - small amount missing (no points off, fixed)
-### .Juan E  - small mask issue? (no points off if fixed)
-### ..Waldo  - wrong wind classes (fixed)
-### ..Ruben  - dropped a lot of areas - mask issues?
-### ..Tyler  - one or more masks is very wrong (fixed in class, but not in gdb)
-### ..Keene  - small problem with a mask (no points off, fixed)
-
-### julia - urban mask issue... small difference, ok
-### joanne - still issues with raster not in results.gdb
-
 
 ```
