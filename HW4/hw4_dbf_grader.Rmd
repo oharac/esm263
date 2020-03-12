@@ -11,12 +11,12 @@ library(tidyverse)
 library(DT)
 
 ### directory where assignments are saved
-dir_asst <- '~/Desktop/hw4_check' 
+dir_asst <- 'hw4_check' 
 ### If you want to try this on your own .dbf file,
 ### change this to point to the folder where your .dbf is, then knit it
 ```
 
-# Load all data and mash into data frame
+# Check my key against some student examples
 
 Use `list.files` to identify all the .dbf files, including the full path.  Use `lapply` to quickly read in each one into a list.  We can use the `foreign::read.dbf()` function to read this format, instead of `readr::read_csv()`.
 
@@ -44,10 +44,14 @@ csv_df <- lapply(csvs, FUN = function(f) {
   return(df)
 }) %>% bind_rows()
 
+mdl_key <- foreign::read.dbf('keys/mdl_out.dbf') %>%
+  mutate(method = 'full vals') %>%
+  bind_rows(foreign::read.dbf('keys/mdl_out_view_01.dbf', as.is = TRUE) %>%
+              mutate(method = 'vals 0 1')) %>%
+  janitor::clean_names()
+if('mean' %in% names(mdl_key)) mdl_key <- mdl_key %>% rename(key_score = mean)
 
-### Use bind_rows to combine the list of data frames; then
-### pull student names out of the file name. Student names should
-### be XxxxYyyyy format, so use caps to identify.
+
 scores_df <- dbf_df %>%
   bind_rows(csv_df) %>%
   mutate(score = round(score, 3)) %>%
@@ -55,6 +59,14 @@ scores_df <- dbf_df %>%
   group_by(calwnum, score) %>%
   mutate(n_at_this_score = n()) %>%
   ungroup()
+
+tol <- 0.01
+check_df <- scores_df %>%
+  left_join(mdl_key, by = 'calwnum') %>%
+  mutate(correct = (abs(score - key_score) < tol)) %>%
+  group_by(file, method) %>%
+  summarize(n_correct = sum(correct),
+            pct_correct = n_correct / n())
 
   # bind_rows() %>%
   # mutate(student = str_replace_all(file, 'HW2|.dbf$', ''),
@@ -66,119 +78,125 @@ scores_df <- dbf_df %>%
   #          ### note: this helps for hyphenated or double last names...
   # select(-student)
 
-DT::datatable(scores_df)
+DT::datatable(check_df)
 ```
 
-# Grade each column
+# output checks
 
-Grade each column to determine how many elements are correct.  Here it'll be 10 pts for each column, which we'll rescale at the end to get points to enter into Gauchospace.
-
-## Set up checker for column A
-
-For each student, check column A.  Looking for two things:
-
-* values are correctly aggregated
-* values are correctly converted (note the possibility of alternate values based on method).
-
-First, set up dataframe to represent three expected conditions:
-
-A) correctly aggregated, and converted with "proper" rounding (full credit)
-B) correctly aggregated, and converted with "floor" rounding (those that don't match A) (full credit)
-C) correctly aggregated, and no conversion. (half credit)
-D) other (probably not correctly aggregated). (no credit, or check)
-
-Then for each student check that their values match one of these conditions.  
+## Viewshed zone sums
 
 ```{r}
-a_vec_proper <- c(11, 31, 89, 221, 316, 372, 422, 467, 504, 543)
-a_vec_alt    <- c(10, 30, 89, 220, 316, 372, 421, 467, 504, 542)
-a_vec_unagg  <- c(108665, 306344, 890760, 2205778, 3160510, 
-                  3722414, 4219221, 4673206, 5043201, 5427027)
+view_dbfs <- list.files('out_checks', pattern = 'view.+.dbf$',
+                   full.names = TRUE, recursive = TRUE)
+view_key <- foreign::read.dbf('keys/view_sums_out.dbf', as.is = TRUE) %>%
+  mutate(method = 'full vals') %>%
+  bind_rows(foreign::read.dbf('keys/view_sums_0_1_out.dbf', as.is = TRUE) %>%
+              mutate(method = 'vals 0 1')) %>%
+  janitor::clean_names() %>%
+  select(calwnum, key_score = mean, method)
 
-### combine vectors, attach conditions, drop alt conversions that match
-### proper conversions...
-col_a_df <- data.frame(
-  a_check = c(a_vec_proper, a_vec_alt, a_vec_unagg),
-  a_result = rep(c('agg_conv', 'agg_conv_alt', 'agg_no_conv'), each = 10)
-) %>%
-  filter(!(a_result == 'agg_conv_alt' & a_check %in% a_vec_proper))
+view_df <- lapply(view_dbfs, FUN = function(f) {
+  df <- foreign::read.dbf(f, as.is = TRUE) %>%
+    janitor::clean_names() %>%
+    mutate(file = basename(f))
+  if('mean' %in% names(df)) df <- df %>% rename(score = mean)
+  return(df)
+}) %>%
+  bind_rows()
 
-### grade col A: how many correct, half for unconverted
-col_a_grades <- dbf_df %>%
-  left_join(col_a_df, by = c('A' = 'a_check')) %>%
-  group_by(first, last) %>%
-  summarize(grade_a = 
-              sum(str_detect(a_result, 'agg_conv')) +         ### full credit
-              0.5 * sum(str_detect(a_result, 'agg_no_conv'))) ### half credit
+
+view_scores_df <- view_df %>%
+  mutate(score = round(score, 3)) %>%
+  select(calwnum, score, file) %>%
+  group_by(calwnum, score) %>%
+  mutate(n_at_this_score = n()) %>%
+  ungroup()
+
+view_tol <- 1
+view_check_df <- view_scores_df %>%
+  left_join(view_key, by = 'calwnum') %>%
+  mutate(correct = (abs(score - key_score) <= view_tol)) %>%
+  group_by(file, method) %>%
+  summarize(n_correct = sum(correct),
+            pct_correct = 100 * n_correct / n())
+
+
+DT::datatable(view_check_df)
 ```
 
-
-
-## Set up checker for column P
-
-For each student, check column P.  This is simpler - no conversion! Incorrect values will not match in the join, so a simple sum of non-NA values will do the trick.
+## Riparian zone sums
 
 ```{r}
-p_vec_proper <- c(60, 149, 375, 967, 1866, 2871, 3597, 4396, 5188, 5926)
+rip_dbfs <- list.files('out_checks', pattern = 'rip.+.dbf$',
+                   full.names = TRUE, recursive = TRUE)
+rip_key <- foreign::read.dbf('keys/rip_sums_out.dbf', as.is = TRUE) %>%
+  janitor::clean_names() %>%
+  select(calwnum, key_score = mean)
+rip_df <- lapply(rip_dbfs, FUN = function(f) {
+  df <- foreign::read.dbf(f, as.is = TRUE) %>%
+    janitor::clean_names() %>%
+    mutate(file = basename(f))
+  if('mean' %in% names(df)) df <- df %>% rename(score = mean)
+  return(df)
+}) %>%
+  bind_rows()
 
-### combine vectors, attach conditions
-col_p_df <- data.frame(p_check  = p_vec_proper,
-                       p_result = 'agg')
 
-### grade col P: how many correct, half for unconverted
-col_p_grades <- dbf_df %>%
-  left_join(col_p_df, by = c('P' = 'p_check')) %>%
-  group_by(first, last) %>%
-  summarize(grade_p = sum(!is.na(p_result)))
+rip_scores_df <- rip_df %>%
+  mutate(score = round(score, 3)) %>%
+  select(calwnum, score, file) %>%
+  group_by(calwnum, score) %>%
+  mutate(n_at_this_score = n()) %>%
+  ungroup()
+
+rip_tol <- 1
+rip_check_df <- rip_scores_df %>%
+  full_join(rip_key, by = 'calwnum') %>%
+  mutate(correct = (abs(score - key_score) < rip_tol)) %>%
+  group_by(file) %>%
+  summarize(n_correct = sum(correct),
+            pct_correct = 100 * n_correct / n())
+
+
+DT::datatable(rip_check_df)
 ```
 
-## Set up checker for column L
 
-For each student, check column L.  Looking for two things:
-
-* values are correctly aggregated
-* values are correctly converted.  Here we don't need to concern ourselves about the rounding issue since the dollars column is type `real`.
-
-First, set up dataframe to represent two expected conditions:
-
-A) correctly aggregated and converted (full credit)
-B) correctly aggregated, but no conversion. (half credit)
-C) other (probably not correctly aggregated). (no credit, or check)
-
-Then for each student check that their values match one of these conditions.  To account for students who have rounded their results (i.e. suppressing extra decimals).
+## Developable zone sums
 
 ```{r}
-l_vec_unconv <-  c(51399882, 139067580, 333597714, 873587561, 1506297548,
-                   2116348045, 2582901090, 3032425496, 3425427269, 3831109432)
-l_vec_conv <- round(l_vec_unconv / 1e6)
+dev_dbfs <- list.files('out_checks', pattern = 'dev.+.dbf$',
+                   full.names = TRUE, recursive = TRUE)
+dev_key <- foreign::read.dbf('keys/dev_scores_out.dbf', as.is = TRUE) %>%
+  janitor::clean_names() %>%
+  select(calwnum, key_score = mean)
+dev_df <- lapply(dev_dbfs, FUN = function(f) {
+  df <- foreign::read.dbf(f, as.is = TRUE) %>%
+    janitor::clean_names() %>%
+    mutate(file = basename(f))
+  if('mean' %in% names(df)) df <- df %>% rename(score = mean)
+  return(df)
+}) %>%
+  bind_rows()
 
-### combine vectors, attach conditions, drop alt conversions that match
-### proper conversions...
-col_l_df <- data.frame(
-  l_check = c(l_vec_unconv, l_vec_conv),
-  l_result = rep(c('agg_no_conv', 'agg_conv'), each = 10)
-)
 
-### grade col L: how many correct, half for unconverted
-col_l_grades <- dbf_df %>%
-  mutate(l_round = round(L)) %>%
-  left_join(col_l_df, by = c('l_round' = 'l_check')) %>%
-  group_by(first, last) %>%
-  summarize(grade_l = 
-              sum(str_detect(l_result, 'agg_conv')) +         ### full credit
-              0.5 * sum(str_detect(l_result, 'agg_no_conv'))) ### half credit
+dev_scores_df <- dev_df %>%
+  mutate(score = round(score, 3)) %>%
+  select(calwnum, score, file) %>%
+  group_by(calwnum, score) %>%
+  mutate(n_at_this_score = n()) %>%
+  ungroup()
+
+dev_tol <- 0
+dev_check_df <- dev_scores_df %>%
+  full_join(dev_key, by = 'calwnum') %>%
+  mutate(diff = abs(score - key_score),
+         diff_pct = diff / key_score,
+         correct = (diff <= dev_tol)) %>%
+  group_by(file) %>%
+  summarize(n_correct = sum(correct),
+            pct_correct = 100 * n_correct / n())
+
+
+DT::datatable(dev_check_df)
 ```
-
-# Combine scores
-
-Bring all the scoring dfs together and calculate a total score for each student.  Each column (raw score out of 10) will be worth 1.5 pts, and an extra 0.5 freebie for getting the assignment into the right format.  Note: if the filenaming is not right, you'll lose 0.5 pts!
-
-```{r}
-all_grades_df <- col_a_grades %>%
-  left_join(col_p_grades, by = c('last', 'first')) %>%
-  left_join(col_l_grades, by = c('last', 'first')) %>%
-  mutate(grade = (grade_a + grade_l + grade_p) * 1.5 / 10 + 0.5)
-
-DT::datatable(all_grades_df)
-```
-
