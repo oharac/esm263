@@ -1,11 +1,17 @@
 ### Helper functions to check for and inspect differences between rasters
 
 find_diffs <- function(test_rast, key_rast) {
+
+  if(compareRaster(test_rast, key_rast, stopiffalse = FALSE) == FALSE) {
+    return(NULL)
+  }
   ### normalize both rasters to 1s. 
   ### Presumably, extents, CRS, and res should be identical, so 
   ### stack should work just fine:
   s_rast_norm <- test_rast / test_rast
   k_rast_norm <- key_rast / key_rast
+  
+  
   tmp_stack <- stack(s_rast_norm, -k_rast_norm)
 
   diff_rast <- calc(tmp_stack, fun = sum, na.rm = TRUE)
@@ -28,8 +34,11 @@ check_rast <- function(test_rast, key_rast, tol = .002) {
     abs()
   
   ### find cells where the two rasters disagree 
-  diff_rast <- find_diffs(test_rast, key_rast) %>%
-    abs()
+  diff_rast <- find_diffs(test_rast, key_rast)
+  
+  if(is.null(diff_rast)) return(data.frame(good = NA))
+  
+  diff_rast <- abs(diff_rast)
   
   celldiff <- sum(values(diff_rast), na.rm = TRUE)
   celldiff_check <- celldiff / n_cells_key

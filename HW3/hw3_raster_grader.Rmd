@@ -62,20 +62,23 @@ gdbs <- list.files(dir_asst, pattern = '.gdb$',
 
 missing <- student_dirs[!student_dirs %in% basename(dirname(gdbs))]
 
-problems <- paste(c('Janelle', # nothing in gdb
-                    'Nicole'),  # nothing in gdb
-                  collapse = '|')
+# problems <- paste(c('Janelle', # nothing in gdb
+#                     'Nicole'),  # nothing in gdb
+#                   collapse = '|')
 
-gdbs_fixed <- gdbs[!str_detect(gdbs, problems)]
+# gdbs_fixed <- gdbs[!str_detect(gdbs, problems)]
 
-for(gdb in gdbs_fixed) {
-  ### gdb <- gdbs[48]
+for(gdb in gdbs) {
+  ### gdb <- gdbs[42]
   cat('getting raster from ', gdb, '\n')
   tmp <- arc.open(gdb)
   raster_names <- tmp@children[['RasterDataset']]
   
   if(length(raster_names) > 1) cat('more than one raster!!!!!  ', gdb, '\n  ', paste(raster_names, collapse = ', '), '\n')
-  if(length(raster_names) == 0) stop('no raster!!!!!  ', gdb)
+  if(length(raster_names) == 0) {
+    message('no raster!!!!!  ', gdb)
+    next()
+  }
   out_file <- file.path(dirname(gdb), paste0(raster_names[1], '.tif'))
   if(file.exists(out_file)) {
     cat('File exists: ', out_file, '... skipping!\n')

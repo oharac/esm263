@@ -171,7 +171,7 @@ plot(roads_mask_rast,
 ### as a tif without risk of overwriting the vector files.
 writeRaster(roads_mask_rast, 'output/roads_mask.tif', overwrite = TRUE)
 
-mapview(roads_mask_rast)
+# mapview(roads_mask_rast)
 ```
 
 Let's compare to what I got in ArcMap:
@@ -231,7 +231,7 @@ urban_rast <- fasterize(urban_sf, base_rast)
 ### distance away from the urban areas
 urban_dist_rast <- raster::distance(urban_rast)
 
-mapview(urban_dist_rast, layer.name = 'Distance from urban areas')
+# mapview(urban_dist_rast, layer.name = 'Distance from urban areas')
 ### Now, we can reclassify it (though I'll use the indexing version
 ### because it just seems cleaner to me).  First create a copy
 urban_mask_rast <- urban_dist_rast
@@ -244,7 +244,7 @@ urban_mask_rast <- urban_mask_rast %>%
 writeRaster(urban_mask_rast, 'output/urban_mask_dist.tif', 
             overwrite = TRUE)
 
-mapview(urban_mask_rast, layer.name = 'Urban mask raster')
+# mapview(urban_mask_rast, layer.name = 'Urban mask raster')
 ```
 
 How does this compare to the ArcMap version?  The `all.equal()` function tells us they're not identical; we could try `compareRaster()`.
@@ -292,7 +292,7 @@ if(!file.exists(public_mask_file)) {
 
 public_mask_sf <- read_sf(public_mask_file)
 
-mapview(public_mask_sf, layer.name = 'Public mask')
+# mapview(public_mask_sf, layer.name = 'Public mask')
 ```
 
 And yet again, let's also make a raster version for later.
@@ -300,8 +300,8 @@ And yet again, let's also make a raster version for later.
 ```{r}
 public_mask_rast <- fasterize::fasterize(public_mask_sf, base_rast)
 
-mapview(public_mask_rast) +
-  mapview(public_mask_sf)
+# mapview(public_mask_rast) +
+  # mapview(public_mask_sf)
 
 writeRaster(public_mask_rast, 'output/public_mask.tif', 
             overwrite = TRUE)
@@ -319,8 +319,8 @@ fire_mask_sf <- read_sf(fire_mask_file)
 
 fire_mask_rast <- fasterize::fasterize(fire_mask_sf, base_rast)
 
-mapview(fire_mask_sf) +
-  mapview(fire_mask_rast)
+# mapview(fire_mask_sf) +
+  # mapview(fire_mask_rast)
 
 writeRaster(fire_mask_rast, 'output/fire_mask.tif', 
             overwrite = TRUE)
@@ -337,8 +337,8 @@ airport_mask_file <- 'output/airport_mask.gpkg'
 airport_mask_sf <- read_sf(airport_mask_file)
 airport_mask_rast <- fasterize::fasterize(airport_mask_sf, base_rast)
 
-mapview(airport_mask_sf) +
-  mapview(airport_mask_rast)
+# mapview(airport_mask_sf) +
+  # mapview(airport_mask_rast)
 
 writeRaster(airport_mask_rast, 'output/airport_mask.tif', 
             overwrite = TRUE)
@@ -362,7 +362,7 @@ all_mask_rast <- wind_mask_rast %>%
 
 writeRaster(all_mask_rast, 'output/suitable_mask.tif', overwrite = TRUE)
 
-mapview(all_mask_rast)
+# mapview(all_mask_rast)
 ```
 
 Check it against ArcMap results:
@@ -389,12 +389,12 @@ mask_stack <- raster::stack(wind_mask_rast,
 
 mask_product <- mask_stack %>%
   raster::calc(fun = prod)
-mapview(mask_product, layer.name = 'Mask product')
+# mapview(mask_product, layer.name = 'Mask product')
 writeRaster(mask_product, 'output/suitable_stack.tif', overwrite = TRUE)
 
 mask_sum <- mask_stack %>%
   raster::calc(fun = sum, na.rm = TRUE)
-mapview(mask_sum, layer.name = 'Mask sum')
+# mapview(mask_sum, layer.name = 'Mask sum')
 ```
 
 Check it against ArcMap results:
@@ -415,7 +415,7 @@ suitable_rast <- raster('output/suitable_stack.tif')
 
 results_clumped <- suitable_rast %>%
   raster::clump()
-mapview(results_clumped)
+# mapview(results_clumped)
 ```
 
 To identify the top ten sites by connected area, let's use some `tidyverse` magic.  Remembering that a raster can be considered as just a long vector of cell values, we can create a dataframe with the raster cell values, then aggregate and count 'em up to rank by size.
@@ -437,7 +437,7 @@ Then we can substitute the rank values into the `results_clumped` raster, using 
 results_ranked_rast <- raster::subs(results_clumped, top_ten_df, 
                                     by = 'group_id', which = 'rank')
 
-mapview(results_ranked_rast)
+# mapview(results_ranked_rast)
 
 ### ggplot can't work directly on rasters, it needs data.frames.  Let's
 ### also make the rank as a factor so it's categorical.
