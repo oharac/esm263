@@ -53,7 +53,7 @@ dbf_df <- lapply(dbfs, FUN = function(f) {
   
   ### make sure columns are correct
   cols_good <- ncol(df) == 3
-  colnames_good <- all(names(df) %in% c('score', 'calwnum', 'file'))
+  colnames_good <- all(names(df) %in% c('score', 'calwnum', 'student'))
   df <- df %>%
     mutate(cols_good = cols_good,
            names_good = colnames_good)
@@ -67,6 +67,7 @@ grades_data_format <- dbf_df %>%
   summarize(n_watersheds = sum(!is.na(score)),
             cols_good = first(cols_good),
             names_good = first(names_good))
+DT::datatable(grades_data_format)
 
 ```
 
