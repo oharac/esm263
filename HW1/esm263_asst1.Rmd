@@ -1,20 +1,23 @@
 ---
 title: "ESM263 Assignment 1"
 author: "Casey O'Hara"
-date: "1/6/2020"
-output: html_document
+date: "2/24/23"
+output: 
+  html_document:
+    code_folding: hide
 ---
 
-```{r setup, include=FALSE}
+```{r setup, echo = TRUE, message = FALSE, warning = FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 library(tidyverse)
+library(here)
 library(sf)
 library(cowplot)
 ```
 
 # Overview
 
-The focus of this $\textsf R$ Markdown script is to show basic map-making capabilities in $\textsf R$, based on Assignment 1 from Frew's ESM 263 class.  We'll use the `sf` package and `tidyverse` to:
+The focus of this $\textsf R$ Markdown script is to show basic map-making capabilities in $\textsf R$, based on Assignment 1 from Frew's ESM 263 class (Winter 2020).  We'll use the `sf` package and `tidyverse` to:
 
 * read in a shapefile containing countries of the world and the CountryWatch data
 * make simple calculations of the CountryWatch data to "bin" data into quintiles
@@ -23,7 +26,7 @@ The focus of this $\textsf R$ Markdown script is to show basic map-making capabi
 
 ## Vector spatial data in $\textsf R$
 
-For creating a pretty map layout, $\textsf R$ may be somewhat limited compared to ArcMap, especially since ArcMap has a graphical interface designed specifically for making nice layouts.  When we get to spatial analysis, we can do mamy things in $\textsf R$ that we will learn how to do in ArcMap.
+For creating a pretty map layout, $\textsf R$ may be somewhat limited compared to ArcMap or QGIS, especially since these standalone GIS software applications use a graphical interface designed specifically for making nice layouts.  When we get to spatial analysis, we can do many things in $\textsf R$ that we will learn how to do in standalone GIS.
 
 Some notes: The `sf` package is a powerful and relatively new $\textsf R$ package that works with vector spatial data (polygons, lines, points - as opposed to rasters).  It is designed to work well within the `tidyverse` functions and workflow.  An older system of spatial analysis was built around a package called `sp`, and its cousins `rgdal` and `rgeos`, which implement a couple of general spatial analysis libraries: [GDAL, or Geospatial Data Abstraction Library](https://gdal.org/faq.html) and [GEOS, or Geometry Engine - Open Source](https://trac.osgeo.org/geos/). The `sf` package relies on the same libraries but is much less annoying than the older `sp` package.
 
@@ -36,12 +39,12 @@ For this assignment, the `HW1.gdb` file is a geodatabase containing just a grid 
 In the `sf` package, most functions start with `st_` (for "spatiotemporal"), including `st_read` and `st_write`, but there's also `read_sf` and `write_sf` which are basically the same with a few simplifying assumptions.  Point the `read` functions toward the shapefile `.shp`, and it will automatically pull in the `.dbf` and `.prj` and whatnot.
 
 ```{r}
-country_data_sf <- st_read('shapefiles/Countries.shp') %>%
+country_data_sf <- st_read(here('HW1', 'shapefiles/Countries.shp')) %>%
   janitor::clean_names()
-grid_sf <- read_sf('shapefiles/World30.shp') %>%
+grid_sf <- read_sf(here('HW1', 'shapefiles/World30.shp')) %>%
   janitor::clean_names()
 
-names(country_data_sf)
+# names(country_data_sf)
 ```
 
 ## viewing data from an `sf` object
@@ -74,31 +77,33 @@ ggplot() +
                        direction = 1,
                        limits = c(0, NA)) 
     ### sets bottom limit to 0, top limit to infinity, forcing the 
-    ### palette to go all the way to zero
+    ### palette to go all the way to zero even if no countries have
+    ### a zero value
 ```
 
-Note that we don't even need the grid from the World30 shapefile, `ggplot` adds graticules for us.  Note also that the color scale is continuous - not broken into quintiles or anything.
+Note that we don't even need the grid from the World30 shapefile, `ggplot` adds graticules for us (default, white lines on light grey background).  Note also that the color scale is continuous - not broken into quintiles or anything.
 
 # Making it fancy
 
 With a basic map, we can start to use `theme` and other plot options to make it look a little nicer.  In the assignment, I used a discrete scale for colors, based on certain cut points (60%, 75%, 90%, 100%, more than 100%).  Here let's try dividing into quantiles - I like quintiles, so the bottom 20%, second 20%, etc.  Now we're mapping a discrete variable (quantiles) instead of a continuous (dependency ratio), so we'll use `scale_fill_brewer()` which works for discrete.
 
-Note on the mutate stuff: first calc which quintile each country falls in, then give it a text description.  We can group by quintile and pull the min/max for the text description.  Since we arranged by dependency ratio, we know the quintiles are in order, so `fct_inorder` forces the text descriptions to be factors in the correct order.
+Note on the mutate stuff: first calculate which quintile each country falls in, then give it a text description.  We can group by quintile and pull the min/max for the text description.  Since we arranged by dependency ratio, we know the quintiles are in order, so `fct_inorder` forces the text descriptions to be factors in the correct order.
 
 ```{r}
 dep_quintiles_sf <- depratio_sf %>%
   arrange(depratio) %>% 
   mutate(dep_qtile = ntile(depratio, 5)) %>%
   group_by(dep_qtile) %>%
-  ### note: to escape a percent sign in sprintf, use %% - totally not confusing
+  ### note: to escape a percent sign so it displays in sprintf, 
+  ### use %% - totally not confusing
   mutate(qtile_desc = sprintf('%s%% - %s%%', round(min(depratio)), round(max(depratio))),
          qtile_desc = ifelse(is.na(depratio), NA, qtile_desc), ### for NAs
          qtile_desc = fct_inorder(qtile_desc))
 
 ### to check what the data looks like now
-# dep_qtiles_df <- dep_quintiles_sf %>%
-#   as.data.frame() %>%
-#   select(-geometry)
+dep_qtiles_df <- dep_quintiles_sf %>%
+  as.data.frame() %>%
+  select(-geometry)
 
 ggplot() +
   geom_sf(data = dep_quintiles_sf, aes(fill = qtile_desc)) +
@@ -135,15 +140,18 @@ nicer_plot <- ggplot() +
                        "CountryWatch and ESRI, etc.",
                        sep = '\n')) ### use \n to get multiple lines
 
-ggsave('basic_plot.png', dpi = 300, width = 6.5, height = 3.5)
+ggsave(here('HW1/img/basic_plot.png'), dpi = 300, 
+       width = 6.5, height = 3.5)
 ```
 
-![](basic_plot.png)
+![](img/basic_plot.png)
 
 
 
 
 # Replicating the white-on-black map
+
+One student created a striking negative-image map, white on black, and here's an approximation of that.
 
 ```{r}
 coal_sf <- country_data_sf %>%
@@ -196,10 +204,13 @@ inverse_plot <- ggplot() +
                        "CountryWatch and ESRI, etc.",
                        sep = '\n')) ### use \n to get multiple lines
 
-ggsave('inverse_plot.png', dpi = 300, width = 6.5, height = 3.5)
+ggsave(here('HW1/img/inverse_plot.png'), dpi = 300, width = 6.5, height = 3.5)
+
 ```
 
-![](inverse_plot.png)
+<!--You can use inline code to indicate relative pathnames-->
+<!-- note, this is an HTML comment, starting with the arrow/exclamation point/two dashes and going till the two dashes/arrow -->
+![](`r here('HW1/img/inverse_plot.png')`)
 
 # Multiple maps and insets with `cowplot`
 
@@ -211,9 +222,10 @@ Note that you might have to play with the saved image size to make it look good.
 multi_plot <- cowplot::plot_grid(nicer_plot, inverse_plot, 
                                  align = 'h', ncol = 1, labels = c('A', 'B'))
 
-ggsave('multi_plot.png', width = 6.5, height = 7)
+ggsave(here('HW1/img/multi_plot.png'), width = 6.5, height = 7)
 
-knitr::include_graphics('multi_plot.png') ### a different way of including images in R Markdown
+knitr::include_graphics(here('HW1/img/multi_plot.png')) 
+  ### a different way of including images in R Markdown
 ```
 
 ## Adding an inset
@@ -238,25 +250,32 @@ depratio_legend <- get_legend(nicer_plot)
 
 inset_plot <- ggdraw() +
   draw_plot(coal_map, 
-            x = 0, y = .1,              ### locate the bottom left corner at (0, .1)
-            width = 1, height = .9) +   ### make the plot 1 wide (full panel) and .9 tall (from 0.1 to 1)
+            ### locate the bottom left corner at (0, .1):
+            x = 0, y = .1,              
+            ### make the plot 1 wide (full panel) and .9 tall (from 0.1 to 1):
+            width = 1, height = .9) +   
   draw_plot(depratio_map,
-            x = .04, y = .35,            ### locate the bottom left at (0.04, 0.30)
-            width = .20, height = .20) + ### shrink this map to be smaller.
+            ### locate the bottom left at (0.04, 0.30):
+            x = .04, y = .35,            
+            ### shrink this map to be smaller.:
+            width = .20, height = .20) + 
   draw_plot(depratio_legend,
-            x = .06, y = .10,            ### locate the bottom left at (.06, .05)
-            width = .2, height = .3) +   ### legend interacts weirdly with size and location so play around
+            ### locate the bottom left at (.06, .05):
+            x = .06, y = .10,            
+            ### legend interacts weirdly with size and location so play around:
+            width = .2, height = .3) +   
   draw_plot(coal_legend,
-            x = .76, y = .10,            ### locate the bottom left at (.06, .05)
+            ### locate the bottom left at (.76, .10):
+            x = .76, y = .10,            
             width = .2, height = .3) 
 
-ggsave('inset_plot.png', width = 6.5, height = 4)
+ggsave(here('HW1', 'img', 'inset_plot.png'), width = 6.5, height = 4)
 
-knitr::include_graphics('inset_plot.png') 
+knitr::include_graphics(here('HW1', 'img', 'inset_plot.png')) 
 ```
 
 ## more complicated example
 
-Not gonna put the code here for this one, but to give a sense of what you can do with `cowplot` and `ggplot`, here's a complex map graphic I assembled for a paper, [Changes in ocean health in British Columbia from 2001 to 2016](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0227502)
+I'm not gonna put the code here for this one, but to give a sense of what you can do with `cowplot` and `ggplot`, here's a complex map graphic I assembled for a paper, [Changes in ocean health in British Columbia from 2001 to 2016](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0227502)
 
-`r knitr::include_graphics('flower_plot_map_2016.png')`
+`r knitr::include_graphics('img/flower_plot_map_2016.png')`

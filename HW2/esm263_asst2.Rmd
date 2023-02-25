@@ -6,17 +6,15 @@ output:
   html_document:
     toc: yes
     number_sections: yes
-    code_folding: show
+    code_folding: hide
 ---
 
-```{r setup, include=FALSE}
+```{r setup, echo = TRUE, message = FALSE, warning = FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
-### NOTE: loading the raster package BEFORE tidyverse... to avoid the
-### raster::select() function from overriding the dplyr::select().
-library(raster)
 library(sf)
 library(tidyverse)
+library(here)
 ```
 
 # Overview
@@ -41,32 +39,34 @@ We will use `janitor::clean_names()` to clean up the column names for each of th
 ```{r}
 ### use st_layers() to peek inside a geodatabase to see what layers are
 ### available inside
-st_layers('data/HW2.gdb')
-
+st_layers(here('HW2', 'data/HW2.gdb'))
 
 ### Let's read in the county, streets, and parcels data from 
 ### the geodatabase:
-sb_county_sf <- st_read(dsn = 'data/HW2.gdb', layer = 'County') %>%
+sb_county_sf <- st_read(dsn = here('HW2/data/HW2.gdb'), 
+                        layer = 'County') %>%
   janitor::clean_names()
   ### dsn is "data source name" i.e. the name of the geodatabase,
-  ### while layer is the layer name.
+  ### while layer is the layer name within the geodatabase.
   ### Note: st_read() is the basic vector spatial data read function
 
-streets_sf <- read_sf(dsn = 'data/HW2.gdb', layer = 'Streets') %>%
+streets_sf <- read_sf(dsn = here('HW2/data/HW2.gdb'), 
+                      layer = 'Streets') %>%
   janitor::clean_names()
   ### Note: read_sf() is identical to st_read(), EXCEPT: it doesn't
   ### spam you with messages, and keeps strings as characters instead 
   ### of factors.  I prefer it generally.
 
-parcels_sf   <- read_sf(dsn = 'data/HW2.gdb', layer = 'Parcels') %>%
+parcels_sf   <- read_sf(dsn = here('HW2/data/HW2.gdb'), 
+                        layer = 'Parcels') %>%
   janitor::clean_names()
 
-### Let's read the elevation and ROI from shapefiles.
+### Let's read the elevation and region of interest (ROI) from shapefiles.
 ### Here, just stick the full path name to the .shp file into a single 
 ### filename for dsn:
-elev_sf <- read_sf(dsn = 'data/shapefiles/elevation.shp') %>%
+elev_sf <- read_sf(dsn = here('HW2', 'data/shapefiles/elevation.shp')) %>%
   janitor::clean_names()
-roi_sf <- read_sf('data/shapefiles/roi.shp') %>%
+roi_sf <- read_sf(here('HW2', 'data/shapefiles/roi.shp')) %>%
   janitor::clean_names()
 
 ```
@@ -85,29 +85,33 @@ sf_list <- list(sb_county_sf, streets_sf,
 ### lapply() takes a list or vector as its first argument, here our list
 ### of sf objects; and then a function to apply to each, here we'll use
 ### the names() function to get names for each object.
-lapply(sf_list, FUN = names)
+
+### I'll comment this out here, so the HTML doesn't have a 
+### ton of text printed out... run it manually
+# lapply(sf_list, FUN = names)
 ```
 
 Notice the ones read from the geodatabase have a column called "Shape" and the ones from the shapefiles have a column called "geometry" - basically the column that holds the information on the actual points to connect into a polygon.  No idea why the different name though!
 
 ## Checking the CRS
 
-Let's use `st_crs()` to examine the coordinate reference system for each of these vector spatial data objects, to make sure they're all in the same projection and datum.  Here we'll also use one of the `apply` functions, `lapply`, to apply this function over a list of objects, i.e. a list of all our `xxx_sf` objects.
+Let's use `st_crs()` to examine the coordinate reference system for each of these vector spatial data objects, to make sure they're all in the same projection and datum.  Here we'll also use one of the `apply` functions, `lapply`, to apply this function over a list of objects, i.e. a list of all our `xxx_sf` objects.  NOTE: could do the same with `purrr::map()`!
 
 ```{r}
 ### Here, we'll use lapply with the st_crs function from the sf package.  
 ### We get a list of all the CRS values for our objects.
 crs_list <- lapply(sf_list, FUN = st_crs)
 
-crs_list
+### again comment out so it doesn't print out a lot of text in the
+### HTML; run it manually
+# crs_list
 ```
 
-Here we see all six objects have the same `proj4string` which is a way to contain all the info on a coordinate reference system.  For this CRS:
+Here we see most objects have the same coordinate reference system, NAD83 datum and California Albers projection (EPSG:3310).  The elevation object is different, EPSG:9001, a different take on NAD83 Albers.  Let's transform the elevation polygons to California Albers projection, using the sb_county_sf as the target CRS:
 
-* `+proj=aea` means projection is `aea` or Albers equal area.
-* `+lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000` establishes the standard parallels, the center longitude, and an x/y offset.
-* `+datum=NAD83` tells us the datum is the North American Datum of 1983.
-* `+units=m` tells us the units are meters, rather than degrees.
+```{r}
+elev_sf <- st_transform(elev_sf, crs = st_crs(sb_county_sf))
+```
 
 ## Quick plot
 
@@ -155,7 +159,7 @@ Here we'll perform a spatial join by doing the following steps:
 
 ## Identifying and fixing an invalid geometry
 
-Note that in this analysis, I found that the `parcels_sf` has one feature that is "invalid" - basically it overlaps itself in an illegal way.  And all the features in `elev_sf` are considered invalid!  Not sure how ArcMap got around this problem!  I first noticed this because I got an error - note the "Ring Self-intersection" gives it away:
+Note that in this analysis, I found that the `parcels_sf` has one feature that is "invalid" - basically it overlaps itself in an illegal way.    Not sure how ArcMap got around this problem!  I first noticed this because I got an error - note the "Ring Self-intersection" gives it away:
 
 ```
 Error in CPL_geos_op2(op, st_geometry(x), st_geometry(y)) : 
