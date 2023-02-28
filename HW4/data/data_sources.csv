@@ -1,0 +1,8 @@
+layer,source,notes
+dem100.tif,USGS 2009,1 arc second (30 m) National Elevation Dataset resampled to 100 m
+landsat71.tif,USGS 2005,Landsat ETM+ bands 1–5
+parcels,SBCGIS 2009,Santa Barbara County assessor's parcels
+Observation_Points,(ESM 263),we made these up
+roi,(ESM 263),dissolved watersheds
+streams,SBCGIS 2002,southern Santa Barbara County streams
+watersheds,Calwater 2.2.1,southern Santa Barbara County watersheds

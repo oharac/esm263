@@ -1,0 +1,60 @@
+---
+title: "Multi-criteria analysis setup"
+author: "Casey O'Hara"
+date: "2023-02-28"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, echo = TRUE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(tidyverse)
+```
+
+# Summary {.tabset}
+
+This script processes the raw data for HW4 to set up the Shiny app where users can select a number of quantiles for the input layers and weights for each input to determine a final set of criteria scores.
+
+## Assignment description
+
+From the assignment:
+
+>Your task is to advise a land trust on which watersheds have the best overall conservation potential. The land trust wants to conduct conservation efforts in watersheds that would help preserve both riparian habitat and scenic viewsheds through conservation easement purchases on inexpensive, but developable land. You will use an MCA framework to produce your results.
+
+![](img/flow.png)
+
+### Available data
+
+The data for this assignment are in [HW4.zip](https://niklasphabian.github.io/ESM263_GIS/assignment/04/HW4.zip).
+
+They have all been projected into “NAD83 / California Albers” (EPSG:3310). The vector layers have been clipped to our region of interest (roi), which is a collection of watersheds in southern Santa Barbara County.
+
+`r knitr::kable(read_csv(here('HW4/data/data_sources.csv')))`
+
+### Assumptions (from assignment)
+
+* *Riparian habitat* is anywhere within 1000 ft of a stream that has an observed Normalized Difference Vegetation Index (NDVI) between 0.2 and 0.5.
+* *Viewshed* is anywhere visible from at least one observation point.
+* *Developable land* is anywhere with a slope of less than 20 percent.
+* *Land cost* is the parcel price per square meter (USD / m²), calculated as `Parcels.NET_AV` (in USD) divided by `Parcels.Shape_Area` (in m²).
+* *Public parcels* (parcels with a non-null `Parcels.NONTAXCODE`) should be ignored.
+* *Unit of analysis* is 1 hectare (e.g., cell size = 100 m).
+* *Standardized scores* are integers from 1 to 4, where 1 = "best" and 4 = "worst".
+    * Use quartiles (4 quantiles) to assign the scores.
+    * Note: for this implementation, users may choose a different number of quantiles if they so desire, e.g., quintiles.
+    * Use the following weights to combine the scores (again, users can select different values if desired):
+
+| weight | score                 |
+|:------:|:----------------------|
+|  0.50	 | riparian habitat area |
+|  0.33	 | viewshed area         |
+|  0.17	 | developable land cost |
+
+## Calculate Viewshed Criterion
+
+## Calculate Develop Criterion
+
+## Calculate Riparian Criterion
