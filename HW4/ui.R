@@ -17,14 +17,21 @@ navbarPage('Multicriteria analysis for conservation priorities',
       # Sidebar with a slider input for number of bins
       sidebarLayout(
           sidebarPanel(
-            h3('Quantiles'),
-            p('To what quantile level should watersheds be scored?'),
+            h3('ESM 263 assignment 4'),
+            'This Shiny App replicates the Multiple Criteria Analysis framework assignment from Bren ESM 263.
+               Your task is to advise a land trust on which watersheds have the best overall 
+               conservation potential. The land trust wants to conduct conservation efforts 
+               in watersheds that would help preserve both riparian habitat and scenic viewsheds 
+               through conservation easement purchases on inexpensive, but developable land.',
+            a(href = 'https://niklasphabian.github.io/ESM263_GIS/assignment/04/', 'See here'), ' for more details.',
+            h4('Priority categories'),
+            p('How many priority categories would you prefer?'),
             sliderInput('ntile',
                         'How many quantiles?',
                         min = 3,
                         max = 10,
                         value = 4),
-            h3('Criteria weighting'),
+            h4('Criteria weighting'),
             p('Weights are relative and need not sum to 1.'),
             numericInput('rip_wt',
                          'Riparian habitat weight',
